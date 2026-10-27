@@ -322,3 +322,22 @@ TEST(verifyReportsMissingAndUnreadableFiles) {
     CHECK(report.problems.size() == 3);
     CHECK(report.commits == 2);
 }
+
+// Merge commits (#13)
+TEST(storageRoundTripsMergeCommits) {
+    TempDir dir;
+    StorageManager storage(dir.path());
+    storage.initialize();
+    storage.saveCommit(sampleCommit(1, "first"));
+    storage.saveCommit(sampleCommit(2, "second"));
+    Commit::Files files;
+    files.emplace("notes.txt", Snapshot("notes.txt", "merged"));
+    storage.saveCommit(Commit(3, 2, "Swaraj", "Merge branch feature", 5, files, 1));
+
+    const History<Commit> history = storage.loadCommits();
+    CHECK(!history.at(2).isMerge());
+    CHECK(history.at(3).isMerge());
+    CHECK(history.at(3).getParentId() == 2);
+    CHECK(history.at(3).getMergedParentId() == 1);
+    CHECK(storage.verify().problems.empty());
+}

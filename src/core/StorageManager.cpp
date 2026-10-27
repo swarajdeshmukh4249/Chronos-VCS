@@ -19,10 +19,12 @@ namespace {
 
 // A commit file looks like this. The message length is in bytes, so a message
 // can hold any text, including newlines. Each file names the object holding its
-// content, and "check" is the hash of everything after the first line.
+// content, and "check" is the hash of everything after the first line. Only a
+// merge commit has the "merged" line, naming the commit it merged in.
 //   check 3b0f6a51c2d47e98
 //   id 3
 //   parent 2
+//   merged 5
 //   author Swaraj
 //   time 1793015606
 //   message 12
@@ -63,6 +65,8 @@ public:
 
     bool atEnd() const { return pos_ == text_.size(); }
     std::size_t position() const { return pos_; }
+    // True when the next line is "key ...", for optional fields.
+    bool nextIs(const std::string& key) const { return text_.compare(pos_, key.size() + 1, key + " ") == 0; }
 
     // The rest of a "key value" line, after checking the key.
     std::string field(const std::string& key) {
@@ -131,6 +135,7 @@ std::string formatCommit(const Commit& commit) {
     std::ostringstream body;
     body << "id " << commit.getId() << "\n"
          << "parent " << commit.getParentId() << "\n"
+         << (commit.isMerge() ? "merged " + std::to_string(commit.getMergedParentId()) + "\n" : "")
          << "author " << author << "\n"
          << "time " << static_cast<long long>(commit.getTimestamp()) << "\n"
          << "message " << commit.getMessage().size() << "\n"
@@ -145,6 +150,7 @@ std::string formatCommit(const Commit& commit) {
 struct CommitRecord {
     int id = 0;
     int parentId = 0;
+    int mergedParentId = 0;
     std::string author;
     std::time_t timestamp = 0;
     std::string message;
@@ -162,6 +168,9 @@ CommitRecord parseCommitRecord(const std::string& text, const std::string& name)
     record.checksumMatches = contentHash(text.substr(reader.position())) == checksum;
     record.id = reader.smallNumber(reader.field("id"));
     record.parentId = reader.smallNumber(reader.field("parent"));
+    if (reader.nextIs("merged")) {
+        record.mergedParentId = reader.smallNumber(reader.field("merged"));
+    }
     record.author = reader.field("author");
     record.timestamp = static_cast<std::time_t>(reader.number(reader.field("time")));
     record.message = reader.block(static_cast<std::size_t>(reader.number(reader.field("message"))));
@@ -274,7 +283,7 @@ History<Commit> StorageManager::loadCommits() const {
             files.emplace(path, Snapshot(path, readFile(object)));
         }
         history.append(Commit(record.id, record.parentId, std::move(record.author), std::move(record.message),
-                              record.timestamp, std::move(files)));
+                              record.timestamp, std::move(files), record.mergedParentId));
     }
     return history;
 }
