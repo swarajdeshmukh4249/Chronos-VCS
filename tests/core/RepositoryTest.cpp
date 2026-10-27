@@ -305,6 +305,11 @@ TEST(branchRulesAreEnforced) {
     CHECK_THROWS(repo.createBranch("bad name"), InvalidBranchNameException);
     CHECK_THROWS(repo.switchBranch("nope"), BranchNotFoundException);
 
+    // Names ignore case everywhere, so "Main" finds main and HEAD keeps the stored spelling.
+    repo.switchBranch("Main");
+    CHECK(repo.getCurrentBranch() == "main");
+    CHECK(Repository::open(dir.path()).getCurrentBranch() == "main");
+
     repo.createBranch("feature");
     writeFile(dir, "notes.txt", "unsaved\n");
     CHECK_THROWS(repo.switchBranch("feature"), UncommittedChangesException);

@@ -37,7 +37,7 @@ private:
     std::size_t pos_ = 0;
 
     [[noreturn]] void fail(const std::string& message) const {
-        throw FormulaSyntaxException("Formula error in \"" + src_ + "\": " + message);
+        throw FormulaSyntaxException("\"" + src_ + "\" is not a valid formula: " + message);
     }
 
     void skipSpace() {

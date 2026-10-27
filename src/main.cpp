@@ -9,7 +9,10 @@
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
+// MinGW's headers already define NOMINMAX.
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <io.h>
 #include <windows.h>
 #ifndef ENABLE_VIRTUAL_TERMINAL_PROCESSING
@@ -188,7 +191,7 @@ int run(const std::vector<std::string>& args) {
                   << ". Use \"chrono switch " << branch.getName() << "\" to work on it.\n";
     } else if (command == "switch" && args.size() == 2) {
         repo.switchBranch(args[1]);
-        std::cout << "Switched to branch " << args[1] << "\n";
+        std::cout << "Switched to branch " << repo.getCurrentBranch() << "\n";
     } else if (command == "merge" && args.size() == 2 && args[1] == "--abort") {
         repo.abortMerge();
         std::cout << "Merge cancelled. Your files are back as they were.\n";

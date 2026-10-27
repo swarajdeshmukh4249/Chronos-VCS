@@ -20,6 +20,14 @@ TEST(diffOfIdenticalTextIsEmpty) {
     CHECK(diffOf("", "").changes.empty());
 }
 
+TEST(diffExplainsAChangeToOnlyTheFinalNewline) {
+    const DiffResult result = diffOf("a\nb", "a\nb\n");
+    CHECK(result.changes.size() == 1);
+    CHECK(result.changes[0].location == "end of file (only the final newline changed)");
+    CHECK(result.changes[0].before.empty());
+    CHECK(result.changes[0].after.empty());
+}
+
 TEST(diffFindsAChangedLine) {
     const DiffResult result = diffOf("a\nb\nc\n", "a\nB\nc\n");
     CHECK(result.changes.size() == 1);

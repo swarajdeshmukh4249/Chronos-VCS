@@ -253,6 +253,46 @@ TEST(overflowThrows) {
     CHECK(isNumber(eval(grid, "=A1/10"), 1e307));
 }
 
+// Issue #31
+namespace {
+
+std::string errorIn(const Grid<Cell>& grid, const char* cell) {
+    try {
+        SheetEvaluator(grid).evaluate(cell);
+    } catch (const ChronoException& e) {
+        return e.what();
+    }
+    return "";
+}
+
+}  // namespace
+
+TEST(friendlyErrorMessagesNameTheCell) {
+    Grid<Cell> grid;
+    grid.set("A1", 5);
+    grid.set("B1", "=A1/0");
+    grid.set("B2", "=A1+");
+    grid.set("B3", "=A0+1");
+    grid.set("B4", "=AVG(Z1:Z3)");
+    grid.set("B5", "=\"abc\"*2");
+    CHECK(errorIn(grid, "B1") == "B1: Can't divide by zero");
+    CHECK(errorIn(grid, "B2") == "B2: \"=A1+\" is not a valid formula: unexpected end of formula");
+    CHECK(errorIn(grid, "B3") == "B3: \"A0\" is not a valid cell. Use a column letter and a row number, like B3.");
+    CHECK(errorIn(grid, "B4") == "B4: AVG needs at least one number");
+    CHECK(errorIn(grid, "B5") == "B5: Expected a number but got text \"abc\"");
+}
+
+TEST(errorsKeepTheTypeAndTheCellWhereTheyStarted) {
+    Grid<Cell> grid;
+    grid.set("A1", "=1/0");
+    for (int row = 2; row <= 1000; ++row) {
+        grid.set(CellRef{row - 1, 0}, "=A" + std::to_string(row - 1) + "+1");
+    }
+    SheetEvaluator evaluator(grid);
+    CHECK_THROWS(evaluator.evaluate("A1000"), DivisionByZeroException);
+    CHECK(errorIn(grid, "A1000") == "A1: Can't divide by zero");
+}
+
 TEST(sharedReferenceIsNotCircular) {
     Grid<Cell> grid;
     grid.set("A1", 2);

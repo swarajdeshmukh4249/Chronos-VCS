@@ -136,6 +136,8 @@ private:
     bool differsFromHead(const Commit::Files& files) const;
     // Throws UncommittedChangesException.
     void requireNoUncommittedChanges() const;
+    // Finds a branch ignoring case, like createBranch does. Throws BranchNotFoundException.
+    const Branch& findBranch(const std::string& name) const;
     // Writes these files and removes tracked files that aren't among them.
     void restoreFiles(const Commit::Files& files);
     // Points HEAD, and the current branch if there is one, at commit id.
