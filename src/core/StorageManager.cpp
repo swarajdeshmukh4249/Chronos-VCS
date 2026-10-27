@@ -286,7 +286,10 @@ IntegrityReport StorageManager::verify() const {
         try {
             record = parseCommitRecord(readFile(commitPath(id)), commitName(id));
         } catch (const CorruptObjectException& e) {
-            report.problems.push_back({file, e.what()});
+            // The message starts with the commit's name; the report already shows the file.
+            const std::string what = e.what();
+            const std::size_t damaged = what.find("is damaged");
+            report.problems.push_back({file, damaged == std::string::npos ? what : what.substr(damaged)});
             continue;
         }
         ++report.commits;
