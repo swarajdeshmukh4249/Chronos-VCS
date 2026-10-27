@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "common/DiffAlgorithm.h"
+#include "common/MergeStrategy.h"
 #include "core/Branch.h"
 #include "core/Commit.h"
 #include "core/History.h"
@@ -21,6 +22,24 @@ struct FileDiff {
     std::string path;
     Status status;
     DiffResult result;
+};
+
+// What happened when a branch was merged in.
+struct MergeOutcome {
+    enum class Kind {
+        AlreadyUpToDate,  // everything on the branch is already in HEAD
+        FastForward,      // HEAD was behind, so it simply moved forward
+        Merged,           // both sides had changes; a merge commit was made
+        Conflicts         // files have conflict markers; fix them and commit
+    };
+    struct FileConflict {
+        std::string path;
+        Conflict conflict;
+    };
+
+    Kind kind = Kind::AlreadyUpToDate;
+    int commitId = 0;  // HEAD afterwards, for FastForward and Merged
+    std::vector<FileConflict> conflicts;
 };
 
 // A project's version history. StorageManager handles .chrono/ and WorkingTree
@@ -40,8 +59,10 @@ public:
     const std::set<std::string>& getTracked() const { return tracked_; }
 
     // Saves every tracked file as a new commit whose parent is the HEAD commit,
-    // and moves the current branch to it. Throws NothingToCommitException when
-    // nothing is tracked or nothing changed.
+    // and moves the current branch to it. While a merge waits on conflicts, this
+    // finishes it with a merge commit. Throws NothingToCommitException when
+    // nothing is tracked or nothing changed, or MergeConflictException if a file
+    // still has conflict markers.
     const Commit& commit(const std::string& message, const std::string& author);
 
     // The commit the working files came from, or 0 before the first commit.
@@ -93,6 +114,20 @@ public:
     // NothingToCommitException if the files already match.
     const Commit& revert(int id, const std::string& author);
 
+    // Brings the branch's changes into HEAD: a fast-forward when HEAD is simply
+    // behind, otherwise a three-way merge against the commit where they split.
+    // On conflicts the files are written with markers and nothing is committed
+    // until the user fixes them and commits. Throws BranchNotFoundException,
+    // UncommittedChangesException, or MergeConflictException if a merge is
+    // already waiting.
+    MergeOutcome merge(const std::string& branch, const std::string& author);
+    // True while a merge waits for its conflicts to be fixed and committed.
+    bool isMerging() const { return pending_.commitId != 0; }
+    const PendingMerge& getPendingMerge() const { return pending_; }
+    // Puts the files back as they were before the merge. Throws
+    // MergeConflictException if no merge is waiting.
+    void abortMerge();
+
 private:
     explicit Repository(const std::filesystem::path& root);
 
@@ -105,10 +140,15 @@ private:
     void restoreFiles(const Commit::Files& files);
     // Points HEAD, and the current branch if there is one, at commit id.
     void moveHeadTo(int id);
+    // Records files as a new commit on top of HEAD and moves HEAD to it.
+    const Commit& saveNewCommit(const std::string& message, const std::string& author, Commit::Files files,
+                                int mergedParentId);
 
     static std::vector<FileDiff> compare(const Commit::Files& before, const Commit::Files& after);
     // Strategy pattern: how to compare one file. Phase 3 adds a cell-by-cell diff for .csv files.
     static std::unique_ptr<DiffAlgorithm> diffAlgorithmFor(const std::string& path);
+    // Strategy pattern: how to merge one file. #15 sends .csv files to a cell-by-cell merge.
+    static std::unique_ptr<MergeStrategy> mergeStrategyFor(const std::string& path);
 
     WorkingTree tree_;
     StorageManager storage_;
@@ -117,4 +157,5 @@ private:
     std::map<std::string, Branch> branches_;
     std::string branch_;
     int head_ = 0;
+    PendingMerge pending_;
 };

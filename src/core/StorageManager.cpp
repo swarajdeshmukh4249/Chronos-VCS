@@ -383,6 +383,31 @@ HeadRef StorageManager::loadHead() const {
     return head;
 }
 
+void StorageManager::savePendingMerge(const PendingMerge& merge) const {
+    if (merge.commitId == 0) {
+        std::error_code ignored;
+        fs::remove(folder_ / "MERGE", ignored);
+        return;
+    }
+    writeFile(folder_ / "MERGE", std::to_string(merge.commitId) + " " + merge.branch + "\n");
+}
+
+PendingMerge StorageManager::loadPendingMerge() const {
+    if (!fs::exists(folder_ / "MERGE")) {
+        return {};
+    }
+    const std::string text = trimLineEnd(readFile(folder_ / "MERGE"));
+    CommitReader reader(text, std::string(kFolderName) + "/MERGE");
+    const std::size_t space = text.find(' ');
+    PendingMerge merge;
+    merge.commitId = reader.smallNumber(text.substr(0, space));
+    merge.branch = space == std::string::npos ? "" : text.substr(space + 1);
+    if (merge.commitId == 0 || !Branch::isValidName(merge.branch)) {
+        reader.fail("expected \"<commit id> <branch>\"");
+    }
+    return merge;
+}
+
 void StorageManager::saveBranch(const Branch& branch) const {
     std::error_code ignored;
     fs::create_directories(folder_ / "branches", ignored);

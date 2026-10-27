@@ -49,6 +49,12 @@ public:
     using ChronoException::ChronoException;
 };
 
+// A merge is waiting to be finished, or a file still has conflict markers.
+class MergeConflictException : public ChronoException {
+public:
+    using ChronoException::ChronoException;
+};
+
 // Checking out would overwrite edits that were never committed.
 class UncommittedChangesException : public ChronoException {
 public:

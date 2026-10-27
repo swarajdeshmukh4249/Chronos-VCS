@@ -358,3 +358,150 @@ TEST(mergeBaseFindsWhereBranchesSplit) {
     CHECK(repo.ancestorsOf(5) == (std::set<int>{1, 2, 4, 5}));
     CHECK_THROWS(repo.mergeBase(1, 9), CommitNotFoundException);
 }
+
+namespace {
+
+// main: #1 "Rent 1000\nFood 300\nGym 0\n"; feature branches off #1.
+Repository budgetRepo(const TempDir& dir) {
+    Repository repo = Repository::init(dir.path());
+    writeFile(dir, "budget.txt", "Rent 1000\nFood 300\nGym 0\n");
+    repo.track("budget.txt");
+    repo.commit("first budget", "Swaraj");
+    repo.createBranch("feature");
+    return repo;
+}
+
+}  // namespace
+
+// Issue #13
+TEST(mergeFastForwardsWhenHeadIsBehind) {
+    TempDir dir;
+    Repository repo = budgetRepo(dir);
+    repo.switchBranch("feature");
+    writeFile(dir, "budget.txt", "Rent 1000\nFood 350\nGym 0\n");
+    repo.commit("raise food", "Tanishka");  // #2
+    repo.switchBranch("main");
+
+    const MergeOutcome outcome = repo.merge("feature", "Swaraj");
+    CHECK(outcome.kind == MergeOutcome::Kind::FastForward);
+    CHECK(outcome.commitId == 2);
+    CHECK(repo.getHead() == 2);
+    CHECK(readFile(dir, "budget.txt") == "Rent 1000\nFood 350\nGym 0\n");
+    CHECK(repo.log().size() == 2);  // no merge commit needed
+
+    CHECK(repo.merge("feature", "Swaraj").kind == MergeOutcome::Kind::AlreadyUpToDate);
+}
+
+TEST(mergeCombinesChangesFromBothBranches) {
+    TempDir dir;
+    Repository repo = budgetRepo(dir);
+    writeFile(dir, "budget.txt", "Rent 1100\nFood 300\nGym 0\n");
+    repo.commit("raise rent", "Swaraj");  // #2 on main
+    repo.switchBranch("feature");
+    writeFile(dir, "budget.txt", "Rent 1000\nFood 300\nGym 40\n");
+    writeFile(dir, "notes.txt", "gym membership\n");
+    repo.track("notes.txt");
+    repo.commit("add gym", "Tanishka");  // #3 on feature
+    repo.switchBranch("main");
+
+    const MergeOutcome outcome = repo.merge("feature", "Swaraj");
+    CHECK(outcome.kind == MergeOutcome::Kind::Merged);
+    CHECK(outcome.conflicts.empty());
+    CHECK(readFile(dir, "budget.txt") == "Rent 1100\nFood 300\nGym 40\n");
+    CHECK(readFile(dir, "notes.txt") == "gym membership\n");
+
+    const Commit& merge = repo.getCommit(outcome.commitId);
+    CHECK(merge.isMerge());
+    CHECK(merge.getParentId() == 2);
+    CHECK(merge.getMergedParentId() == 3);
+    CHECK(merge.getMessage() == "Merge branch \"feature\" into \"main\"");
+    CHECK(repo.getCurrentBranch() == "main");
+    CHECK(repo.historyOfHead() == (std::vector<int>{4, 3, 2, 1}));
+    CHECK(!repo.isMerging());
+}
+
+TEST(mergeStopsAtConflictsUntilTheyAreFixed) {
+    TempDir dir;
+    {
+        Repository repo = budgetRepo(dir);
+        writeFile(dir, "budget.txt", "Rent 1000\nFood 350\nGym 0\n");
+        repo.commit("food 350", "Swaraj");  // #2
+        repo.switchBranch("feature");
+        writeFile(dir, "budget.txt", "Rent 1000\nFood 250\nGym 0\n");
+        repo.commit("food 250", "Tanishka");  // #3
+        repo.switchBranch("main");
+
+        const MergeOutcome outcome = repo.merge("feature", "Swaraj");
+        CHECK(outcome.kind == MergeOutcome::Kind::Conflicts);
+        CHECK(outcome.conflicts.size() == 1);
+        CHECK(outcome.conflicts[0].path == "budget.txt");
+        CHECK(outcome.conflicts[0].conflict.location == "line 2");
+        CHECK(readFile(dir, "budget.txt") ==
+              "Rent 1000\n<<<<<<< ours\nFood 350\n=======\nFood 250\n>>>>>>> theirs\nGym 0\n");
+        CHECK(repo.isMerging());
+        CHECK(repo.getHead() == 2);  // nothing committed yet
+    }
+
+    // The waiting merge survives closing the program.
+    Repository repo = Repository::open(dir.path());
+    CHECK(repo.isMerging());
+    CHECK(repo.getPendingMerge().branch == "feature");
+    CHECK_THROWS(repo.commit("too early", "Swaraj"), MergeConflictException);
+    CHECK_THROWS(repo.merge("feature", "Swaraj"), MergeConflictException);
+
+    writeFile(dir, "budget.txt", "Rent 1000\nFood 300\nGym 0\n");  // settle on 300
+    const Commit& merge = repo.commit("settle food at 300", "Swaraj");
+    CHECK(merge.isMerge());
+    CHECK(merge.getParentId() == 2);
+    CHECK(merge.getMergedParentId() == 3);
+    CHECK(!repo.isMerging());
+}
+
+TEST(abortMergePutsFilesBack) {
+    TempDir dir;
+    Repository repo = budgetRepo(dir);
+    writeFile(dir, "budget.txt", "Rent 1000\nFood 350\nGym 0\n");
+    repo.commit("food 350", "Swaraj");
+    repo.switchBranch("feature");
+    writeFile(dir, "budget.txt", "Rent 1000\nFood 250\nGym 0\n");
+    writeFile(dir, "extra.txt", "from feature\n");
+    repo.track("extra.txt");
+    repo.commit("food 250", "Tanishka");
+    repo.switchBranch("main");
+
+    CHECK(repo.merge("feature", "Swaraj").kind == MergeOutcome::Kind::Conflicts);
+    repo.abortMerge();
+    CHECK(!repo.isMerging());
+    CHECK(readFile(dir, "budget.txt") == "Rent 1000\nFood 350\nGym 0\n");
+    CHECK(!WorkingTree(dir.path()).exists("extra.txt"));
+    CHECK(!repo.hasUncommittedChanges());
+    CHECK_THROWS(repo.abortMerge(), MergeConflictException);
+}
+
+TEST(mergeFlagsAFileDeletedOnOneSideAndChangedOnTheOther) {
+    TempDir dir;
+    Repository repo = budgetRepo(dir);
+    WorkingTree(dir.path()).remove("budget.txt");
+    writeFile(dir, "readme.txt", "keep one file\n");
+    repo.track("readme.txt");
+    repo.commit("drop budget", "Swaraj");
+    repo.switchBranch("feature");
+    writeFile(dir, "budget.txt", "Rent 1200\nFood 300\nGym 0\n");
+    repo.commit("raise rent", "Tanishka");
+    repo.switchBranch("main");
+
+    const MergeOutcome outcome = repo.merge("feature", "Swaraj");
+    CHECK(outcome.kind == MergeOutcome::Kind::Conflicts);
+    CHECK(outcome.conflicts[0].path == "budget.txt");
+    CHECK(outcome.conflicts[0].conflict.location == "the whole file");
+    CHECK(readFile(dir, "budget.txt") == "Rent 1200\nFood 300\nGym 0\n");
+}
+
+TEST(mergeRules) {
+    TempDir dir;
+    Repository repo = budgetRepo(dir);
+    CHECK_THROWS(repo.merge("nope", "Swaraj"), BranchNotFoundException);
+    CHECK(repo.merge("feature", "Swaraj").kind == MergeOutcome::Kind::AlreadyUpToDate);
+    writeFile(dir, "budget.txt", "unsaved\n");
+    CHECK_THROWS(repo.merge("feature", "Swaraj"), UncommittedChangesException);
+}
