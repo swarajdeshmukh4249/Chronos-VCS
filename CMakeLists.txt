@@ -18,13 +18,20 @@ target_include_directories(chrono PRIVATE include src)
 # Spreadsheet layer tests. Run with: ctest --test-dir build
 file(GLOB SHEET_SOURCES CONFIGURE_DEPENDS src/sheet/*.cpp)
 file(GLOB SHEET_TESTS CONFIGURE_DEPENDS tests/sheet/*.cpp)
-add_executable(sheet_tests ${SHEET_TESTS} ${SHEET_SOURCES})
-target_include_directories(sheet_tests PRIVATE include src)
+add_executable(sheet_tests tests/common/TestMain.cpp ${SHEET_TESTS} ${SHEET_SOURCES})
+target_include_directories(sheet_tests PRIVATE include src tests/common)
+
+# Core layer tests.
+file(GLOB CORE_SOURCES CONFIGURE_DEPENDS src/core/*.cpp)
+file(GLOB CORE_TESTS CONFIGURE_DEPENDS tests/core/*.cpp)
+add_executable(core_tests tests/common/TestMain.cpp ${CORE_TESTS} ${CORE_SOURCES})
+target_include_directories(core_tests PRIVATE include src tests/common)
 
 enable_testing()
 add_test(NAME sheet_tests COMMAND sheet_tests)
+add_test(NAME core_tests COMMAND core_tests)
 
-foreach(target chrono sheet_tests)
+foreach(target chrono sheet_tests core_tests)
     if(MSVC)
         target_compile_options(${target} PRIVATE /W4)
     else()
