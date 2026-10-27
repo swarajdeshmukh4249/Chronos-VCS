@@ -188,3 +188,50 @@ TEST(commitAfterCheckoutUsesHeadAsParent) {
     CHECK(third.getParentId() == 1);
     CHECK(repo.getHead() == 3);
 }
+
+// Issue #11
+TEST(diffBetweenCommitsListsChangedFiles) {
+    TempDir dir;
+    Repository repo = Repository::init(dir.path());
+    writeFile(dir, "keep.txt", "same\n");
+    writeFile(dir, "notes.txt", "Budget v1\n");
+    writeFile(dir, "old.txt", "bye\n");
+    repo.track("keep.txt");
+    repo.track("notes.txt");
+    repo.track("old.txt");
+    repo.commit("first", "Swaraj");
+    writeFile(dir, "notes.txt", "Budget v2\n");
+    WorkingTree(dir.path()).remove("old.txt");
+    writeFile(dir, "new.txt", "hello\n");
+    repo.track("new.txt");
+    repo.commit("second", "Swaraj");
+
+    const std::vector<FileDiff> diffs = repo.diff(1, 2);
+    CHECK(diffs.size() == 3);  // keep.txt is unchanged, so it is left out
+    CHECK(diffs[0].path == "new.txt");
+    CHECK(diffs[0].status == FileDiff::Status::Added);
+    CHECK(diffs[0].result.changes[0].after == "hello\n");
+    CHECK(diffs[1].path == "notes.txt");
+    CHECK(diffs[1].status == FileDiff::Status::Modified);
+    CHECK(diffs[1].result.changes[0].before == "Budget v1\n");
+    CHECK(diffs[1].result.changes[0].after == "Budget v2\n");
+    CHECK(diffs[2].path == "old.txt");
+    CHECK(diffs[2].status == FileDiff::Status::Removed);
+
+    CHECK(repo.diff(2, 2).empty());
+    CHECK_THROWS(repo.diff(1, 7), CommitNotFoundException);
+}
+
+TEST(diffUncommittedComparesWithHead) {
+    TempDir dir;
+    Repository repo = Repository::init(dir.path());
+    writeFile(dir, "notes.txt", "a\nb\n");
+    repo.track("notes.txt");
+    CHECK(repo.diffUncommitted().size() == 1);  // nothing committed yet, so the file is new
+    repo.commit("first", "Swaraj");
+    CHECK(repo.diffUncommitted().empty());
+    writeFile(dir, "notes.txt", "a\nB\n");
+    const std::vector<FileDiff> diffs = repo.diffUncommitted();
+    CHECK(diffs.size() == 1);
+    CHECK(diffs[0].result.changes[0].location == "line 2");
+}

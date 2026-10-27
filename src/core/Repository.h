@@ -1,13 +1,25 @@
 #pragma once
 
 #include <filesystem>
+#include <memory>
 #include <set>
 #include <string>
+#include <vector>
 
+#include "common/DiffAlgorithm.h"
 #include "core/Commit.h"
 #include "core/History.h"
 #include "core/StorageManager.h"
 #include "core/WorkingTree.h"
+
+// How one file differs between two versions of the project.
+struct FileDiff {
+    enum class Status { Added, Removed, Modified };
+
+    std::string path;
+    Status status;
+    DiffResult result;
+};
 
 // A project's version history. StorageManager handles .chrono/ and WorkingTree
 // handles the user's files, so this class only holds the version-control rules.
@@ -36,6 +48,12 @@ public:
     // Throws CommitNotFoundException.
     const Commit& getCommit(int id) const;
 
+    // What changed from commit fromId to commit toId, one entry per changed file.
+    // Throws CommitNotFoundException.
+    std::vector<FileDiff> diff(int fromId, int toId) const;
+    // What changed in the tracked files since the HEAD commit.
+    std::vector<FileDiff> diffUncommitted() const;
+
     // True when a tracked file differs from the HEAD commit.
     bool hasUncommittedChanges() const;
 
@@ -59,6 +77,10 @@ private:
     void requireNoUncommittedChanges() const;
     // Writes target's files and removes tracked files it doesn't have.
     void restoreFiles(const Commit& target);
+
+    static std::vector<FileDiff> compare(const Commit::Files& before, const Commit::Files& after);
+    // Strategy pattern: how to compare one file. Phase 3 adds a cell-by-cell diff for .csv files.
+    static std::unique_ptr<DiffAlgorithm> diffAlgorithmFor(const std::string& path);
 
     WorkingTree tree_;
     StorageManager storage_;

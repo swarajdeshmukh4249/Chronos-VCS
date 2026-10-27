@@ -3,6 +3,7 @@
 #include <ctime>
 
 #include "common/Exceptions.h"
+#include "core/LCSDiff.h"
 
 namespace fs = std::filesystem;
 
@@ -64,6 +65,45 @@ const Commit& Repository::getCommit(int id) const {
         throw CommitNotFoundException("There is no commit #" + std::to_string(id));
     }
     return commits_.at(static_cast<std::size_t>(id));
+}
+
+std::vector<FileDiff> Repository::diff(int fromId, int toId) const {
+    return compare(getCommit(fromId).getFiles(), getCommit(toId).getFiles());
+}
+
+std::vector<FileDiff> Repository::diffUncommitted() const {
+    return compare(head_ == 0 ? Commit::Files{} : getCommit(head_).getFiles(), currentFiles());
+}
+
+std::vector<FileDiff> Repository::compare(const Commit::Files& before, const Commit::Files& after) {
+    std::set<std::string> paths;
+    for (const auto& entry : before) {
+        paths.insert(entry.first);
+    }
+    for (const auto& entry : after) {
+        paths.insert(entry.first);
+    }
+
+    std::vector<FileDiff> diffs;
+    for (const std::string& path : paths) {
+        auto old = before.find(path);
+        auto now = after.find(path);
+        const Snapshot empty(path, "");
+        const Snapshot& oldFile = old == before.end() ? empty : old->second;
+        const Snapshot& newFile = now == after.end() ? empty : now->second;
+        if (old != before.end() && now != after.end() && oldFile.getContent() == newFile.getContent()) {
+            continue;
+        }
+        const FileDiff::Status status = old == before.end()  ? FileDiff::Status::Added
+                                        : now == after.end() ? FileDiff::Status::Removed
+                                                             : FileDiff::Status::Modified;
+        diffs.push_back({path, status, diffAlgorithmFor(path)->diff(oldFile, newFile)});
+    }
+    return diffs;
+}
+
+std::unique_ptr<DiffAlgorithm> Repository::diffAlgorithmFor(const std::string&) {
+    return std::make_unique<LCSDiff>();
 }
 
 bool Repository::hasUncommittedChanges() const {
