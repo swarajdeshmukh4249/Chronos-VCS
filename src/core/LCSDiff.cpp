@@ -131,5 +131,9 @@ DiffResult LCSDiff::diff(const Snapshot& a, const Snapshot& b) const {
         }
     }
     flush();
+    // splitLines reads "a" and "a\n" as the same lines, so say why the file still differs.
+    if (result.changes.empty() && a.getContent() != b.getContent()) {
+        result.changes.push_back({"end of file (only the final newline changed)", "", ""});
+    }
     return result;
 }
