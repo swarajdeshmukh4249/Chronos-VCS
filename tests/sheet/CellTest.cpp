@@ -41,6 +41,16 @@ TEST(nonNumericTextStaysText) {
     CHECK(Cell("1.2.3").getKind() == Cell::Kind::Text);
     CHECK(Cell("-").getKind() == Cell::Kind::Text);
     CHECK(Cell("inf").getKind() == Cell::Kind::Text);
+    CHECK(Cell("1e").getKind() == Cell::Kind::Text);
+    CHECK(Cell("e5").getKind() == Cell::Kind::Text);
+    CHECK(Cell("1e400").getKind() == Cell::Kind::Text);
+}
+
+TEST(exponentNumbersAreNumbers) {
+    CHECK(Cell("1e5").getNumber() == 100000);
+    CHECK(Cell("1E+20").getNumber() == 1e20);
+    CHECK(Cell("-2.5e-3").getNumber() == -0.0025);
+    CHECK(Cell(Cell(1e20).getRaw()).getNumber() == 1e20);
 }
 
 TEST(emptyStringIsEmpty) {
