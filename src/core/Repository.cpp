@@ -390,3 +390,74 @@ Commit::Files Repository::currentFiles() const {
     }
     return files;
 }
+
+RepositoryState Repository::captureState(const std::string& description) const {
+    RepositoryState state;
+    state.description = description;
+    state.head = branch_.empty() ? HeadRef{"", head_} : HeadRef{branch_, 0};
+    state.branches = getBranches();
+    state.tracked = tracked_;
+    state.merge = pending_;
+    for (const auto& [path, snapshot] : currentFiles()) {
+        state.files.emplace(path, storage_.saveObject(snapshot.getContent()));
+    }
+    return state;
+}
+
+void Repository::rememberForUndo(const RepositoryState& state) {
+    storage_.pushUndo(state);
+}
+
+std::string Repository::nextUndo() const {
+    return storage_.hasUndo() ? storage_.peekUndo().description : "";
+}
+
+std::string Repository::undo() {
+    const RepositoryState state = storage_.peekUndo();
+
+    // Undo may replace the working files, so only do it when they're saved somewhere.
+    const Commit::Files current = currentFiles();
+    bool saved = isMerging() || !differsFromHead(current);
+    for (auto it = commits_.begin(); !saved && it != commits_.end(); ++it) {
+        saved = it->hasSameFiles(current);
+    }
+    if (!saved) {
+        throw UncommittedChangesException("You've edited files since the last command. Commit them first, "
+                                          "then undo.");
+    }
+
+    for (const auto& entry : branches_) {
+        storage_.deleteBranch(entry.first);
+    }
+    branches_.clear();
+    for (const Branch& branch : state.branches) {
+        storage_.saveBranch(branch);
+        branches_.emplace(branch.getName(), branch);
+    }
+
+    branch_ = state.head.branch;
+    if (branch_.empty()) {
+        head_ = state.head.commitId;
+    } else {
+        auto it = branches_.find(branch_);
+        if (it == branches_.end()) {
+            throw CorruptObjectException("The undo history names branch \"" + branch_ + "\", which it doesn't list");
+        }
+        head_ = it->second.getCommitId();
+    }
+    storage_.saveHead(state.head);
+
+    pending_ = state.merge;
+    storage_.savePendingMerge(pending_);
+
+    Commit::Files files;
+    for (const auto& [path, hash] : state.files) {
+        files.emplace(path, Snapshot(path, storage_.loadObject(hash)));
+    }
+    restoreFiles(files);
+    tracked_ = state.tracked;
+    storage_.saveTracked(tracked_);
+
+    storage_.popUndo();
+    return state.description;
+}

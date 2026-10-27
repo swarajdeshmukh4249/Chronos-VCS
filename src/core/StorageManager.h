@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <map>
 #include <set>
 #include <string>
 #include <vector>
@@ -22,6 +23,17 @@ struct PendingMerge {
     std::string branch;
 };
 
+// Memento pattern: everything `undo` needs to put the repository back as it was
+// before a command. Working files are stored as content hashes in objects/.
+struct RepositoryState {
+    std::string description;  // the command this state came before, e.g. "commit \"fix totals\""
+    HeadRef head;
+    std::vector<Branch> branches;
+    std::set<std::string> tracked;
+    PendingMerge merge;
+    std::map<std::string, std::string> files;  // path -> content hash
+};
+
 // One thing `verify` found wrong, e.g. {".chrono/objects/af63...", "was changed (notes.txt in commit #2)"}.
 struct IntegrityProblem {
     std::string file;
@@ -39,6 +51,7 @@ struct IntegrityReport {
 //   .chrono/HEAD             "ref: main" on a branch, or a commit id when not on one
 //   .chrono/branches/<name>  id of the branch's newest commit (0 = none yet)
 //   .chrono/MERGE            "<commit id> <branch>" while a merge waits on conflicts
+//   .chrono/undo/<n>.txt     what to restore for each undoable command, newest highest
 //   .chrono/tracked          one tracked path per line
 //   .chrono/commits/<id>.txt one commit (see StorageManager.cpp for the format)
 //   .chrono/objects/<hash>   one version of a file, named by its content hash
@@ -80,8 +93,24 @@ public:
     void saveBranch(const Branch& branch) const;
     // Sorted by name. Throws CorruptObjectException if a branch file is malformed.
     std::vector<Branch> loadBranches() const;
+    // Does nothing if the branch has no file.
+    void deleteBranch(const std::string& name) const;
+
+    // Stores content in objects/ (once) and returns its hash.
+    std::string saveObject(const std::string& content) const;
+    // Throws CorruptObjectException if the object is missing.
+    std::string loadObject(const std::string& hash) const;
+
+    // The undo history is a stack of states in .chrono/undo/<n>.txt.
+    void pushUndo(const RepositoryState& state) const;
+    bool hasUndo() const;
+    // The most recent state. Throws NothingToUndoException when the stack is empty.
+    RepositoryState peekUndo() const;
+    void popUndo() const;
 
 private:
+    int highestUndoNumber() const;
+
     int highestCommitId() const;
     std::filesystem::path commitPath(int id) const;
     // e.g. "Commit 2 (.chrono/commits/2.txt)", for error messages.

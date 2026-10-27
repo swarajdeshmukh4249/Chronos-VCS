@@ -49,6 +49,11 @@ public:
     using ChronoException::ChronoException;
 };
 
+class NothingToUndoException : public ChronoException {
+public:
+    using ChronoException::ChronoException;
+};
+
 // A merge is waiting to be finished, or a file still has conflict markers.
 class MergeConflictException : public ChronoException {
 public:

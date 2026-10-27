@@ -121,6 +121,20 @@ public:
     // UncommittedChangesException, or MergeConflictException if a merge is
     // already waiting.
     MergeOutcome merge(const std::string& branch, const std::string& author);
+    // Memento pattern: a snapshot of HEAD, branches, tracked files, any waiting
+    // merge and the working files, taken before a command runs.
+    RepositoryState captureState(const std::string& description) const;
+    // Adds a snapshot to the undo history, after its command succeeded.
+    void rememberForUndo(const RepositoryState& state);
+    // What `undo` would take back, e.g. "commit \"fix totals\"", or "" if nothing.
+    std::string nextUndo() const;
+    // Puts everything back as it was before the last remembered command and
+    // returns that command's description. Commits it took back stay in the
+    // history (`log --all`), so nothing is lost. Throws NothingToUndoException,
+    // or UncommittedChangesException if files were edited and aren't saved in
+    // any commit.
+    std::string undo();
+
     // True while a merge waits for its conflicts to be fixed and committed.
     bool isMerging() const { return pending_.commitId != 0; }
     const PendingMerge& getPendingMerge() const { return pending_; }
