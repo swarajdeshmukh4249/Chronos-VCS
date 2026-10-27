@@ -18,8 +18,8 @@ target_include_directories(chrono PRIVATE include src)
 # Spreadsheet layer tests. Run with: ctest --test-dir build
 file(GLOB SHEET_SOURCES CONFIGURE_DEPENDS src/sheet/*.cpp)
 file(GLOB SHEET_TESTS CONFIGURE_DEPENDS tests/sheet/*.cpp)
-add_executable(sheet_tests ${SHEET_TESTS} ${SHEET_SOURCES})
-target_include_directories(sheet_tests PRIVATE include src)
+add_executable(sheet_tests tests/common/TestMain.cpp ${SHEET_TESTS} ${SHEET_SOURCES})
+target_include_directories(sheet_tests PRIVATE include src tests/common)
 
 enable_testing()
 add_test(NAME sheet_tests COMMAND sheet_tests)
