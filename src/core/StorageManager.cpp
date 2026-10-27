@@ -457,3 +457,128 @@ std::set<std::string> StorageManager::loadTracked() const {
     }
     return paths;
 }
+
+void StorageManager::deleteBranch(const std::string& name) const {
+    std::error_code ignored;
+    fs::remove(folder_ / "branches" / name, ignored);
+}
+
+std::string StorageManager::saveObject(const std::string& content) const {
+    const std::string hash = contentHash(content);
+    std::error_code ignored;
+    fs::create_directories(folder_ / "objects", ignored);
+    if (!fs::exists(folder_ / "objects" / hash)) {
+        writeFile(folder_ / "objects" / hash, content);
+    }
+    return hash;
+}
+
+std::string StorageManager::loadObject(const std::string& hash) const {
+    if (!isContentHash(hash) || !fs::is_regular_file(folder_ / "objects" / hash)) {
+        throw CorruptObjectException(objectName(hash) + " is missing");
+    }
+    return readFile(folder_ / "objects" / hash);
+}
+
+// An undo file has one item per line, in this order:
+//   description commit "fix totals"
+//   head ref: main          (or "head 3" when not on a branch)
+//   branch 4 main           one per branch
+//   tracked notes.txt       one per tracked file
+//   merge 5 feature         only while a merge waits on conflicts
+//   file af63dc4c8601ec8c notes.txt
+void StorageManager::pushUndo(const RepositoryState& state) const {
+    std::string description = state.description;
+    for (char& c : description) {
+        if (c == '\n' || c == '\r') {
+            c = ' ';
+        }
+    }
+    std::string text = "description " + description + "\n";
+    text += state.head.branch.empty() ? "head " + std::to_string(state.head.commitId) + "\n"
+                                      : "head ref: " + state.head.branch + "\n";
+    for (const Branch& branch : state.branches) {
+        text += "branch " + std::to_string(branch.getCommitId()) + " " + branch.getName() + "\n";
+    }
+    for (const std::string& path : state.tracked) {
+        text += "tracked " + path + "\n";
+    }
+    if (state.merge.commitId != 0) {
+        text += "merge " + std::to_string(state.merge.commitId) + " " + state.merge.branch + "\n";
+    }
+    for (const auto& [path, hash] : state.files) {
+        text += "file " + hash + " " + path + "\n";
+    }
+    std::error_code ignored;
+    fs::create_directories(folder_ / "undo", ignored);
+    writeFile(folder_ / "undo" / (std::to_string(highestUndoNumber() + 1) + ".txt"), text);
+}
+
+bool StorageManager::hasUndo() const {
+    return highestUndoNumber() > 0;
+}
+
+RepositoryState StorageManager::peekUndo() const {
+    const int number = highestUndoNumber();
+    if (number == 0) {
+        throw NothingToUndoException("There is nothing to undo");
+    }
+    const std::string name = std::string(kFolderName) + "/undo/" + std::to_string(number) + ".txt";
+    const std::string text = readFile(folder_ / "undo" / (std::to_string(number) + ".txt"));
+    CommitReader reader(text, name);
+    RepositoryState state;
+    state.description = reader.field("description");
+    const std::string head = reader.field("head");
+    if (head.rfind("ref: ", 0) == 0) {
+        state.head.branch = head.substr(5);
+    } else {
+        state.head.commitId = reader.smallNumber(head);
+    }
+    // Splits "<number or hash> <rest>" for the lines that carry a name or path.
+    auto split = [&reader](const std::string& value) {
+        const std::size_t space = value.find(' ');
+        if (space == std::string::npos || space + 1 == value.size()) {
+            reader.fail("\"" + value + "\" is missing a name");
+        }
+        return std::make_pair(value.substr(0, space), value.substr(space + 1));
+    };
+    while (reader.nextIs("branch")) {
+        const auto [id, branch] = split(reader.field("branch"));
+        state.branches.emplace_back(branch, reader.smallNumber(id));
+    }
+    while (reader.nextIs("tracked")) {
+        state.tracked.insert(reader.field("tracked"));
+    }
+    if (reader.nextIs("merge")) {
+        const auto [id, branch] = split(reader.field("merge"));
+        state.merge = PendingMerge{reader.smallNumber(id), branch};
+    }
+    while (reader.nextIs("file")) {
+        const auto [hash, path] = split(reader.field("file"));
+        if (!isContentHash(hash)) {
+            reader.fail("\"" + hash + "\" is not a content hash");
+        }
+        state.files.emplace(path, hash);
+    }
+    if (!reader.atEnd()) {
+        reader.fail("unexpected line");
+    }
+    return state;
+}
+
+void StorageManager::popUndo() const {
+    const int number = highestUndoNumber();
+    if (number > 0) {
+        std::error_code ignored;
+        fs::remove(folder_ / "undo" / (std::to_string(number) + ".txt"), ignored);
+    }
+}
+
+int StorageManager::highestUndoNumber() const {
+    int highest = 0;
+    std::error_code ignored;
+    for (const fs::directory_entry& entry : fs::directory_iterator(folder_ / "undo", ignored)) {
+        highest = std::max(highest, commitIdFromFileName(entry.path()));
+    }
+    return highest;
+}

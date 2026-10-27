@@ -1,5 +1,6 @@
 #include "core/Repository.h"
 
+#include <algorithm>
 #include <ctime>
 #include <sstream>
 
@@ -117,27 +118,8 @@ const Commit& Repository::saveNewCommit(const std::string& message, const std::s
     return commits_.latest();
 }
 
-MergeOutcome Repository::merge(const std::string& name, const std::string& author) {
-    requireNoPendingMerge();
-    const Branch& found = findBranch(name);
-    const std::string branch = found.getName();
-    requireNoUncommittedChanges();
-
-    MergeOutcome outcome;
-    const int theirs = found.getCommitId();
-    if (theirs == 0 || theirs == head_ || (head_ != 0 && ancestorsOf(head_).count(theirs))) {
-        outcome.kind = MergeOutcome::Kind::AlreadyUpToDate;
-        outcome.commitId = head_;
-        return outcome;
-    }
-    if (head_ == 0 || ancestorsOf(theirs).count(head_)) {
-        restoreFiles(getCommit(theirs).getFiles());
-        moveHeadTo(theirs);
-        outcome.kind = MergeOutcome::Kind::FastForward;
-        outcome.commitId = theirs;
-        return outcome;
-    }
-
+Commit::Files Repository::threeWayMerge(int theirs, const std::string& branch,
+                                        std::vector<MergeOutcome::FileConflict>& conflicts) const {
     const int baseId = mergeBase(head_, theirs);
     const Commit::Files none;
     const Commit::Files& baseFiles = baseId == 0 ? none : getCommit(baseId).getFiles();
@@ -179,14 +161,14 @@ MergeOutcome Repository::merge(const std::string& name, const std::string& autho
             conflict.explanation = std::string(ours ? "This branch changed the file and \"" + branch + "\" deleted it."
                                                     : "This branch deleted the file and \"" + branch + "\" changed it.") +
                                    " The changed version was kept; delete it or commit it.";
-            outcome.conflicts.push_back({path, conflict});
+            conflicts.push_back({path, conflict});
             merged.emplace(path, *kept);
             continue;
         } else {
             const Snapshot empty(path, "");
             MergeResult fileResult = mergeStrategyFor(path)->merge(base ? *base : empty, *ours, *their);
             for (const Conflict& conflict : fileResult.conflicts) {
-                outcome.conflicts.push_back({path, conflict});
+                conflicts.push_back({path, conflict});
             }
             merged.emplace(path, Snapshot(path, std::move(fileResult.mergedContent)));
             continue;
@@ -195,6 +177,32 @@ MergeOutcome Repository::merge(const std::string& name, const std::string& autho
             merged.emplace(path, *result);
         }
     }
+
+    return merged;
+}
+
+MergeOutcome Repository::merge(const std::string& name, const std::string& author) {
+    requireNoPendingMerge();
+    const Branch& found = findBranch(name);
+    const std::string branch = found.getName();
+    requireNoUncommittedChanges();
+
+    MergeOutcome outcome;
+    const int theirs = found.getCommitId();
+    if (theirs == 0 || theirs == head_ || (head_ != 0 && ancestorsOf(head_).count(theirs))) {
+        outcome.kind = MergeOutcome::Kind::AlreadyUpToDate;
+        outcome.commitId = head_;
+        return outcome;
+    }
+    if (head_ == 0 || ancestorsOf(theirs).count(head_)) {
+        restoreFiles(getCommit(theirs).getFiles());
+        moveHeadTo(theirs);
+        outcome.kind = MergeOutcome::Kind::FastForward;
+        outcome.commitId = theirs;
+        return outcome;
+    }
+
+    Commit::Files merged = threeWayMerge(theirs, branch, outcome.conflicts);
 
     const std::string message = "Merge branch \"" + branch + "\" into " +
                                 (branch_.empty() ? "commit #" + std::to_string(head_) : "\"" + branch_ + "\"");
@@ -416,4 +424,87 @@ Commit::Files Repository::currentFiles() const {
         }
     }
     return files;
+}
+
+RepositoryState Repository::captureState(const std::string& description) const {
+    RepositoryState state;
+    state.description = description;
+    state.head = branch_.empty() ? HeadRef{"", head_} : HeadRef{branch_, 0};
+    state.branches = getBranches();
+    state.tracked = tracked_;
+    state.merge = pending_;
+    for (const auto& [path, snapshot] : currentFiles()) {
+        state.files.emplace(path, storage_.saveObject(snapshot.getContent()));
+    }
+    return state;
+}
+
+void Repository::rememberForUndo(const RepositoryState& state) {
+    storage_.pushUndo(state);
+}
+
+std::string Repository::nextUndo() const {
+    return storage_.hasUndo() ? storage_.peekUndo().description : "";
+}
+
+std::string Repository::undo() {
+    const RepositoryState state = storage_.peekUndo();
+
+    // Undo may replace the working files, so only do it when they're saved somewhere.
+    const Commit::Files current = currentFiles();
+    bool saved = false;
+    if (isMerging()) {
+        // A waiting merge is in no commit yet, so the files are only safe while
+        // they're still exactly what the merge wrote.
+        std::vector<MergeOutcome::FileConflict> ignored;
+        const Commit::Files written = threeWayMerge(pending_.commitId, pending_.branch, ignored);
+        saved = written.size() == current.size() &&
+                std::equal(written.begin(), written.end(), current.begin(), [](const auto& a, const auto& b) {
+                    return a.first == b.first && a.second.getContent() == b.second.getContent();
+                });
+    } else {
+        saved = !differsFromHead(current);
+        for (auto it = commits_.begin(); !saved && it != commits_.end(); ++it) {
+            saved = it->hasSameFiles(current);
+        }
+    }
+    if (!saved) {
+        throw UncommittedChangesException("You've edited files since the last command. Commit them first, "
+                                          "then undo.");
+    }
+
+    for (const auto& entry : branches_) {
+        storage_.deleteBranch(entry.first);
+    }
+    branches_.clear();
+    for (const Branch& branch : state.branches) {
+        storage_.saveBranch(branch);
+        branches_.emplace(branch.getName(), branch);
+    }
+
+    branch_ = state.head.branch;
+    if (branch_.empty()) {
+        head_ = state.head.commitId;
+    } else {
+        auto it = branches_.find(branch_);
+        if (it == branches_.end()) {
+            throw CorruptObjectException("The undo history names branch \"" + branch_ + "\", which it doesn't list");
+        }
+        head_ = it->second.getCommitId();
+    }
+    storage_.saveHead(state.head);
+
+    pending_ = state.merge;
+    storage_.savePendingMerge(pending_);
+
+    Commit::Files files;
+    for (const auto& [path, hash] : state.files) {
+        files.emplace(path, Snapshot(path, storage_.loadObject(hash)));
+    }
+    restoreFiles(files);
+    tracked_ = state.tracked;
+    storage_.saveTracked(tracked_);
+
+    storage_.popUndo();
+    return state.description;
 }
