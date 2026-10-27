@@ -83,3 +83,9 @@ class TypeMismatchException : public ChronoException {
 public:
     using ChronoException::ChronoException;
 };
+
+// A result too large for a double, e.g. =A1*10 where A1 is 1e308.
+class NumberOverflowException : public ChronoException {
+public:
+    using ChronoException::ChronoException;
+};
