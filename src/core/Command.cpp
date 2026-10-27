@@ -80,7 +80,7 @@ std::string SwitchCommand::describe() const {
 
 int SwitchCommand::execute(Repository& repo, std::ostream& out) {
     repo.switchBranch(name_);
-    out << "Switched to branch " << name_ << "\n";
+    out << "Switched to branch " << repo.getCurrentBranch() << "\n";
     return 0;
 }
 

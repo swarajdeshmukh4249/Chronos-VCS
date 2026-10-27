@@ -305,6 +305,11 @@ TEST(branchRulesAreEnforced) {
     CHECK_THROWS(repo.createBranch("bad name"), InvalidBranchNameException);
     CHECK_THROWS(repo.switchBranch("nope"), BranchNotFoundException);
 
+    // Names ignore case everywhere, so "Main" finds main and HEAD keeps the stored spelling.
+    repo.switchBranch("Main");
+    CHECK(repo.getCurrentBranch() == "main");
+    CHECK(Repository::open(dir.path()).getCurrentBranch() == "main");
+
     repo.createBranch("feature");
     writeFile(dir, "notes.txt", "unsaved\n");
     CHECK_THROWS(repo.switchBranch("feature"), UncommittedChangesException);
@@ -404,7 +409,8 @@ TEST(mergeCombinesChangesFromBothBranches) {
     repo.commit("add gym", "Tanishka");  // #3 on feature
     repo.switchBranch("main");
 
-    const MergeOutcome outcome = repo.merge("feature", "Swaraj");
+    // Names ignore case, and the message uses the branch's own spelling.
+    const MergeOutcome outcome = repo.merge("Feature", "Swaraj");
     CHECK(outcome.kind == MergeOutcome::Kind::Merged);
     CHECK(outcome.conflicts.empty());
     CHECK(readFile(dir, "budget.txt") == "Rent 1100\nFood 300\nGym 40\n");

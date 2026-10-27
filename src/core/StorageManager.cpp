@@ -253,10 +253,22 @@ void StorageManager::saveCommit(const Commit& commit) const {
     fs::create_directories(folder_ / "objects", ignored);
     for (const auto& [path, snapshot] : commit.getFiles()) {
         // Identical content has the same hash, so each version of a file is stored once.
-        const fs::path object = folder_ / "objects" / contentHash(snapshot.getContent());
+        const std::string hash = contentHash(snapshot.getContent());
+        const fs::path object = folder_ / "objects" / hash;
         if (!fs::exists(object)) {
             writeFile(object, snapshot.getContent());
+            continue;
         }
+        // Check the stored copy, so a new commit never points at a damaged one.
+        const std::string stored = readFile(object);
+        if (stored == snapshot.getContent()) {
+            continue;
+        }
+        if (contentHash(stored) == hash) {
+            throw CorruptObjectException("Two different versions of " + path + " have the same hash " + hash +
+                                         ", so Chrono can't store both");
+        }
+        writeFile(object, snapshot.getContent());
     }
     writeFile(commitPath(commit.getId()), formatCommit(commit));
 }

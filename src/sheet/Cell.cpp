@@ -7,7 +7,8 @@
 
 namespace {
 
-// Strict on purpose: only [+-]digits[.digits], so "1e5", "inf" and " 42" stay text.
+// Strict on purpose: only [+-]digits[.digits][e[+-]digits], so "inf", "0x10" and " 42"
+// stay text. The exponent is allowed because formatNumber writes large numbers as "1e+20".
 bool parseNumber(const std::string& text, double& out) {
     std::size_t i = 0;
     if (i < text.size() && (text[i] == '+' || text[i] == '-')) {
@@ -23,6 +24,19 @@ bool parseNumber(const std::string& text, double& out) {
         while (i < text.size() && std::isdigit(static_cast<unsigned char>(text[i]))) {
             ++i;
             ++digits;
+        }
+    }
+    if (digits > 0 && i < text.size() && (text[i] == 'e' || text[i] == 'E')) {
+        ++i;
+        if (i < text.size() && (text[i] == '+' || text[i] == '-')) {
+            ++i;
+        }
+        const std::size_t exponentStart = i;
+        while (i < text.size() && std::isdigit(static_cast<unsigned char>(text[i]))) {
+            ++i;
+        }
+        if (i == exponentStart) {
+            return false;
         }
     }
     if (digits == 0 || i != text.size()) {
