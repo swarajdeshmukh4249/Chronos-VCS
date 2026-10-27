@@ -31,6 +31,10 @@ public:
     int rowCount() const { return rows_; }
     int colCount() const { return cols_; }
 
+    // The positions that were set, as (CellRef, T) pairs in row-major order.
+    typename std::map<CellRef, T>::const_iterator begin() const { return cells_.begin(); }
+    typename std::map<CellRef, T>::const_iterator end() const { return cells_.end(); }
+
 private:
     std::map<CellRef, T> cells_;
     T empty_{};
