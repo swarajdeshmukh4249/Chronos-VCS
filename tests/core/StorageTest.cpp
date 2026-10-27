@@ -133,3 +133,16 @@ TEST(storageRoundTripsHead) {
     overwrite(dir.path() / ".chrono" / "HEAD", "abc\n");
     CHECK_THROWS(storage.loadHead(), CorruptObjectException);
 }
+
+// Issue #48
+TEST(storageRejectsOversizedNumbers) {
+    TempDir dir;
+    StorageManager storage(dir.path());
+    storage.initialize();
+    storage.saveCommit(sampleCommit(1, "first"));
+    overwrite(dir.path() / ".chrono" / "commits" / "1.txt",
+              "id 99999999999\nparent 0\nauthor Swaraj\ntime 5\nmessage 2\nhi\n");
+    CHECK_THROWS(storage.loadCommits(), CorruptObjectException);
+    overwrite(dir.path() / ".chrono" / "HEAD", "99999999999\n");
+    CHECK_THROWS(storage.loadHead(), CorruptObjectException);
+}

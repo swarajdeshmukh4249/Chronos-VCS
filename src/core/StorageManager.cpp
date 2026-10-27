@@ -2,6 +2,7 @@
 
 #include <cctype>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <system_error>
 #include <utility>
@@ -95,6 +96,15 @@ public:
         return result;
     }
 
+    // A number that must fit in an int, such as a commit id.
+    int smallNumber(const std::string& text) {
+        const long long result = number(text);
+        if (result > std::numeric_limits<int>::max()) {
+            fail("\"" + text + "\" is too large");
+        }
+        return static_cast<int>(result);
+    }
+
     [[noreturn]] void fail(const std::string& message) const {
         throw CorruptObjectException(name_ + " is damaged: " + message);
     }
@@ -127,8 +137,8 @@ std::string formatCommit(const Commit& commit) {
 
 Commit parseCommit(const std::string& text, const std::string& name) {
     CommitReader reader(text, name);
-    const int id = static_cast<int>(reader.number(reader.field("id")));
-    const int parentId = static_cast<int>(reader.number(reader.field("parent")));
+    const int id = reader.smallNumber(reader.field("id"));
+    const int parentId = reader.smallNumber(reader.field("parent"));
     std::string author = reader.field("author");
     const auto timestamp = static_cast<std::time_t>(reader.number(reader.field("time")));
     std::string message = reader.block(static_cast<std::size_t>(reader.number(reader.field("message"))));
@@ -227,7 +237,7 @@ int StorageManager::loadHead() const {
         text.pop_back();
     }
     CommitReader reader(text, "HEAD");
-    return static_cast<int>(reader.number(text));
+    return reader.smallNumber(text);
 }
 
 std::set<std::string> StorageManager::loadTracked() const {
