@@ -16,6 +16,12 @@ struct HeadRef {
     int commitId = 0;    // used only when branch is empty
 };
 
+// A merge that stopped at conflicts and waits for the user to fix the files and commit.
+struct PendingMerge {
+    int commitId = 0;  // the commit being merged in; 0 when no merge is waiting
+    std::string branch;
+};
+
 // One thing `verify` found wrong, e.g. {".chrono/objects/af63...", "was changed (notes.txt in commit #2)"}.
 struct IntegrityProblem {
     std::string file;
@@ -32,6 +38,7 @@ struct IntegrityReport {
 // deals with file formats. Files are plain text so they can be opened and read:
 //   .chrono/HEAD             "ref: main" on a branch, or a commit id when not on one
 //   .chrono/branches/<name>  id of the branch's newest commit (0 = none yet)
+//   .chrono/MERGE            "<commit id> <branch>" while a merge waits on conflicts
 //   .chrono/tracked          one tracked path per line
 //   .chrono/commits/<id>.txt one commit (see StorageManager.cpp for the format)
 //   .chrono/objects/<hash>   one version of a file, named by its content hash
@@ -64,6 +71,11 @@ public:
     void saveHead(const HeadRef& head) const;
     // Throws CorruptObjectException if HEAD is missing or malformed.
     HeadRef loadHead() const;
+
+    // Saving a merge with commitId 0 clears it.
+    void savePendingMerge(const PendingMerge& merge) const;
+    // commitId is 0 when no merge is waiting.
+    PendingMerge loadPendingMerge() const;
 
     void saveBranch(const Branch& branch) const;
     // Sorted by name. Throws CorruptObjectException if a branch file is malformed.
