@@ -19,6 +19,7 @@ const char* const kUsage =
     "  add <file>...         include files in future commits\n"
     "  commit -m <message>   save a new version of every tracked file\n"
     "  log                   list commits, newest first\n"
+    "  show <id>             show one commit's details and files\n"
     "  status                show whether there are uncommitted changes\n"
     "  checkout <id>         put the files from a commit back\n"
     "  revert <id>           put a commit's files back and record it as a new commit\n";
@@ -76,6 +77,18 @@ int run(const std::vector<std::string>& args) {
         for (std::size_t id = repo.log().size(); id >= 1; --id) {
             const Commit& commit = repo.log().at(id);
             std::cout << (commit.getId() == repo.getHead() ? "* " : "  ") << commit.summary() << "\n";
+        }
+    } else if (command == "show" && args.size() == 2) {
+        const Commit& commit = repo.getCommit(parseId(args[1]));
+        std::cout << "Commit #" << commit.getId() << (commit.getId() == repo.getHead() ? " (current)" : "") << "\n"
+                  << "Parent:  " << (commit.hasParent() ? "#" + std::to_string(commit.getParentId()) : "none") << "\n"
+                  << "Author:  " << commit.getAuthor() << "\n"
+                  << "Date:    " << commit.formattedTime() << "\n"
+                  << "Message: " << commit.getMessage() << "\n\n"
+                  << "Files (" << commit.getFiles().size() << "):\n";
+        for (const auto& [path, snapshot] : commit.getFiles()) {
+            const std::size_t bytes = snapshot.getContent().size();
+            std::cout << "  " << path << "  (" << bytes << (bytes == 1 ? " byte)\n" : " bytes)\n");
         }
     } else if (command == "status" && args.size() == 1) {
         const std::size_t count = repo.getTracked().size();
