@@ -8,7 +8,7 @@
 namespace {
 
 // Excel shows #NUM! here; we throw instead of letting inf spread through the sheet.
-double finite(double result) {
+double checkFinite(double result) {
     if (!std::isfinite(result)) {
         throw NumberOverflowException("The result is too large to represent");
     }
@@ -112,15 +112,15 @@ Value BinaryFormula::evaluate(const CellResolver& cells) const {
     const Value a = left_->evaluate(cells);
     const Value b = right_->evaluate(cells);
     switch (op_) {
-    case Op::Add: return finite(toNumber(a) + toNumber(b));
-    case Op::Subtract: return finite(toNumber(a) - toNumber(b));
-    case Op::Multiply: return finite(toNumber(a) * toNumber(b));
+    case Op::Add: return checkFinite(toNumber(a) + toNumber(b));
+    case Op::Subtract: return checkFinite(toNumber(a) - toNumber(b));
+    case Op::Multiply: return checkFinite(toNumber(a) * toNumber(b));
     case Op::Divide: {
         const double divisor = toNumber(b);
         if (divisor == 0.0) {
-            throw DivisionByZeroException("Division by zero");
+            throw DivisionByZeroException("Can't divide by zero");
         }
-        return finite(toNumber(a) / divisor);
+        return checkFinite(toNumber(a) / divisor);
     }
     default: return compare(op_, a, b);
     }
@@ -156,19 +156,19 @@ Value SumFormula::evaluate(const CellResolver& cells) const {
     for (double number : numbers(cells)) {
         total += number;
     }
-    return finite(total);
+    return checkFinite(total);
 }
 
 Value AvgFormula::evaluate(const CellResolver& cells) const {
     const std::vector<double> values = numbers(cells);
     if (values.empty()) {
-        throw DivisionByZeroException("AVG has no numbers to average");
+        throw DivisionByZeroException("AVG needs at least one number");
     }
     double total = 0.0;
     for (double number : values) {
         total += number;
     }
-    return finite(finite(total) / static_cast<double>(values.size()));
+    return checkFinite(checkFinite(total) / static_cast<double>(values.size()));
 }
 
 Value IfFormula::evaluate(const CellResolver& cells) const {
