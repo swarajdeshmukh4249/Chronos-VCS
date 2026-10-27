@@ -1,12 +1,28 @@
 #include "core/Repository.h"
 
 #include <ctime>
+#include <sstream>
 
 #include "common/Exceptions.h"
 #include "core/LCSDiff.h"
 #include "core/LineMerge.h"
 
 namespace fs = std::filesystem;
+
+namespace {
+
+// True when any of the three lines LineMerge writes around a conflict is still in content.
+bool hasConflictMarkers(const std::string& content) {
+    std::istringstream lines(content);
+    for (std::string line; std::getline(lines, line);) {
+        if (line.rfind("<<<<<<< ", 0) == 0 || line == "=======" || line.rfind(">>>>>>> ", 0) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+}  // namespace
 
 Repository::Repository(const fs::path& root)
     : tree_(root), storage_(tree_.getRoot()), commits_(storage_.loadCommits()), tracked_(storage_.loadTracked()) {
@@ -72,7 +88,7 @@ const Commit& Repository::commit(const std::string& message, const std::string& 
     if (isMerging()) {
         for (const auto& [path, snapshot] : files) {
             const std::string& content = snapshot.getContent();
-            if (content.rfind("<<<<<<< ", 0) == 0 || content.find("\n<<<<<<< ") != std::string::npos) {
+            if (hasConflictMarkers(content)) {
                 throw MergeConflictException(path + " still has conflict markers. Edit it to keep the lines you "
                                                     "want, then commit again.");
             }
@@ -102,10 +118,7 @@ const Commit& Repository::saveNewCommit(const std::string& message, const std::s
 }
 
 MergeOutcome Repository::merge(const std::string& name, const std::string& author) {
-    if (isMerging()) {
-        throw MergeConflictException("A merge with \"" + pending_.branch +
-                                     "\" is waiting. Fix the conflicts and commit, or abort it first.");
-    }
+    requireNoPendingMerge();
     const Branch& found = findBranch(name);
     const std::string branch = found.getName();
     requireNoUncommittedChanges();
@@ -270,6 +283,7 @@ const Branch& Repository::findBranch(const std::string& name) const {
 }
 
 void Repository::switchBranch(const std::string& name) {
+    requireNoPendingMerge();
     const Branch& branch = findBranch(name);
     requireNoUncommittedChanges();
     const int id = branch.getCommitId();
@@ -338,6 +352,7 @@ bool Repository::differsFromHead(const Commit::Files& files) const {
 }
 
 void Repository::checkout(int id) {
+    requireNoPendingMerge();
     const Commit& target = getCommit(id);
     requireNoUncommittedChanges();
     restoreFiles(target.getFiles());
@@ -347,6 +362,7 @@ void Repository::checkout(int id) {
 }
 
 const Commit& Repository::revert(int id, const std::string& author) {
+    requireNoPendingMerge();
     const Commit& target = getCommit(id);
     requireNoUncommittedChanges();
     // Built before commit() runs, because appending a commit can move target.
@@ -364,6 +380,13 @@ void Repository::moveHeadTo(int id) {
         storage_.saveBranch(branch);
     }
     head_ = id;
+}
+
+void Repository::requireNoPendingMerge() const {
+    if (isMerging()) {
+        throw MergeConflictException("A merge with \"" + pending_.branch +
+                                     "\" is waiting. Commit it or run chrono merge --abort first.");
+    }
 }
 
 void Repository::requireNoUncommittedChanges() const {
