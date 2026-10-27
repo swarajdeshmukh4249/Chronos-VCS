@@ -12,6 +12,12 @@ file(GLOB_RECURSE CHRONO_SOURCES CONFIGURE_DEPENDS
     src/sheet/*.cpp
 )
 
+# Bundle the C++ runtime into each .exe on MinGW. Otherwise Windows may load an older
+# libstdc++-6.dll from PATH (Git Bash ships one) and the program fails to start.
+if(MINGW)
+    add_link_options(-static)
+endif()
+
 add_executable(chrono src/main.cpp ${CHRONO_SOURCES})
 target_include_directories(chrono PRIVATE include src)
 
