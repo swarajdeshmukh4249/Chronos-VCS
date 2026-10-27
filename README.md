@@ -76,7 +76,7 @@ History is stored as plain text under `.chrono/`, so you can open it and see exa
 ```
 include/common/   interfaces and exceptions shared by both layers
 src/core/         version control: commits, history, storage, repository
-src/sheet/        spreadsheet engine: cells, grid, formulas, evaluation
+src/sheet/        spreadsheet engine: cells, grid, formulas, evaluation, dependency graph, CSV
 src/nlp/          plain-English commands (Phase 4)
 src/main.cpp      command-line entry point
 tests/            test suites for each layer, sharing tests/common/
@@ -87,7 +87,7 @@ tests/            test suites for each layer, sharing tests/common/
 | Concept | Where |
 |---|---|
 | Encapsulation | `Commit`, `Cell`, `Repository` keep their data private |
-| Constructor overloading | `Cell()`, `Cell(double)`, `Cell(int)`, `Cell(std::string)` |
+| Constructor overloading | `Cell()`, `Cell(double)`, `Cell(int)`, `Cell(const std::string&)`, `Cell(const char*)` |
 | Abstract classes and runtime polymorphism | `Formula` (evaluated through `formula->evaluate()`), `MergeStrategy`, `DiffAlgorithm` |
 | Templates | `History<T>`, `Grid<T>` |
 | Exceptions | One `ChronoException` hierarchy in `include/common/Exceptions.h` |
