@@ -13,6 +13,11 @@ const int kMaxRows = 1048576;
 const std::size_t kMaxColumnLetters = 3;
 const std::size_t kMaxRowDigits = 7;
 
+[[noreturn]] void invalid(const std::string& name) {
+    throw InvalidCellReferenceException("\"" + name +
+                                        "\" is not a valid cell. Use a column letter and a row number, like B3.");
+}
+
 }  // namespace
 
 CellRef CellRef::parse(const std::string& name) {
@@ -28,7 +33,7 @@ CellRef CellRef::parse(const std::string& name) {
 
     if (letters == 0 || letters > kMaxColumnLetters || digits == 0 || digits > kMaxRowDigits ||
         letters + digits != name.size()) {
-        throw InvalidCellReferenceException("Invalid cell reference: \"" + name + "\"");
+        invalid(name);
     }
 
     int col = 0;
@@ -40,7 +45,7 @@ CellRef CellRef::parse(const std::string& name) {
         row = row * 10 + (name[i] - '0');
     }
     if (row == 0 || row > kMaxRows || col > kMaxColumns) {
-        throw InvalidCellReferenceException("Invalid cell reference: \"" + name + "\"");
+        invalid(name);
     }
     return CellRef{row - 1, col - 1};
 }
