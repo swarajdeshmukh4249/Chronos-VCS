@@ -5,6 +5,6 @@
 
 class DiffAlgorithm {
 public:
-    virtual DiffResult diff(const Snapshot& a, const Snapshot& b) = 0;
+    virtual DiffResult diff(const Snapshot& a, const Snapshot& b) const = 0;
     virtual ~DiffAlgorithm() = default;
 };
