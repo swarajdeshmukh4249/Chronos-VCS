@@ -183,6 +183,76 @@ TEST(circularReferencesThrow) {
     CHECK_THROWS(evaluator.evaluate("A1"), CircularReferenceException);
 }
 
+TEST(circularReferenceNamesTheCycle) {
+    Grid<Cell> grid;
+    grid.set("A1", "=B1+1");
+    grid.set("B1", "=C1");
+    grid.set("C1", "=B1");
+    std::string message;
+    try {
+        SheetEvaluator(grid).evaluate("A1");
+    } catch (const CircularReferenceException& e) {
+        message = e.what();
+    }
+    CHECK(message == "Circular reference: B1 -> C1 -> B1");
+}
+
+// #43: this used to overflow the stack at about 20,000 rows.
+TEST(longReferenceChainEvaluates) {
+    const int rows = 50000;
+    Grid<Cell> grid;
+    grid.set("A1", 1);
+    for (int row = 2; row <= rows; ++row) {
+        grid.set(CellRef{row - 1, 0}, "=A" + std::to_string(row - 1) + "+1");
+    }
+    CHECK(isNumber(SheetEvaluator(grid).evaluate("A" + std::to_string(rows)), rows));
+}
+
+TEST(errorAtTheBottomOfALongChain) {
+    const int rows = 50000;
+    Grid<Cell> grid;
+    grid.set("A1", "=1/0");
+    for (int row = 2; row <= rows; ++row) {
+        grid.set(CellRef{row - 1, 0}, "=A" + std::to_string(row - 1) + "+1");
+    }
+    CHECK_THROWS(SheetEvaluator(grid).evaluate("A" + std::to_string(rows)), DivisionByZeroException);
+}
+
+// #44: A(k+1) = A(k) + A(k) took 17 s at 24 steps without caching.
+TEST(repeatedReferencesAreEvaluatedOnce) {
+    Grid<Cell> grid;
+    grid.set("A1", 1);
+    for (int row = 2; row <= 41; ++row) {
+        const std::string above = "A" + std::to_string(row - 1);
+        grid.set(CellRef{row - 1, 0}, "=" + above + "+" + above);
+    }
+    CHECK(isNumber(SheetEvaluator(grid).evaluate("A41"), 1099511627776.0));  // 2^40
+}
+
+TEST(brokenCellOnlyMattersIfRead) {
+    Grid<Cell> grid;
+    grid.set("B1", "=1/0");
+    grid.set("C1", "=IF(1=1, 5, B1)");
+    grid.set("C2", "=B1+1");
+    SheetEvaluator evaluator(grid);
+    CHECK(isNumber(evaluator.evaluate("C1"), 5));
+    CHECK_THROWS(evaluator.evaluate("C2"), DivisionByZeroException);
+    CHECK_THROWS(evaluator.evaluate("B1"), DivisionByZeroException);
+}
+
+// #45: these used to give inf.
+TEST(overflowThrows) {
+    Grid<Cell> grid;
+    grid.set("A1", 1e308);
+    CHECK_THROWS(eval(grid, "=A1*10"), NumberOverflowException);
+    CHECK_THROWS(eval(grid, "=A1+A1"), NumberOverflowException);
+    CHECK_THROWS(eval(grid, "=-A1-A1"), NumberOverflowException);
+    CHECK_THROWS(eval(grid, "=A1/0.1"), NumberOverflowException);
+    CHECK_THROWS(eval(grid, "=SUM(A1, A1)"), NumberOverflowException);
+    CHECK_THROWS(eval(grid, "=AVG(A1, A1)"), NumberOverflowException);
+    CHECK(isNumber(eval(grid, "=A1/10"), 1e307));
+}
+
 TEST(sharedReferenceIsNotCircular) {
     Grid<Cell> grid;
     grid.set("A1", 2);

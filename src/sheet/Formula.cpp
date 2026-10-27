@@ -1,10 +1,19 @@
 #include "sheet/Formula.h"
 
 #include <algorithm>
+#include <cmath>
 
 #include "common/Exceptions.h"
 
 namespace {
+
+// Excel shows #NUM! here; we throw instead of letting inf spread through the sheet.
+double finite(double result) {
+    if (!std::isfinite(result)) {
+        throw NumberOverflowException("The result is too large to represent");
+    }
+    return result;
+}
 
 double toNumber(const Value& value) {
     if (const double* number = std::get_if<double>(&value)) {
@@ -87,6 +96,14 @@ void RangeFormula::collectValues(const CellResolver& cells, std::vector<Value>& 
     }
 }
 
+void RangeFormula::collectReferences(std::vector<CellRef>& out) const {
+    for (int row = topLeft_.row; row <= bottomRight_.row; ++row) {
+        for (int col = topLeft_.col; col <= bottomRight_.col; ++col) {
+            out.push_back(CellRef{row, col});
+        }
+    }
+}
+
 Value NegateFormula::evaluate(const CellResolver& cells) const {
     return -toNumber(operand_->evaluate(cells));
 }
@@ -95,17 +112,28 @@ Value BinaryFormula::evaluate(const CellResolver& cells) const {
     const Value a = left_->evaluate(cells);
     const Value b = right_->evaluate(cells);
     switch (op_) {
-    case Op::Add: return toNumber(a) + toNumber(b);
-    case Op::Subtract: return toNumber(a) - toNumber(b);
-    case Op::Multiply: return toNumber(a) * toNumber(b);
+    case Op::Add: return finite(toNumber(a) + toNumber(b));
+    case Op::Subtract: return finite(toNumber(a) - toNumber(b));
+    case Op::Multiply: return finite(toNumber(a) * toNumber(b));
     case Op::Divide: {
         const double divisor = toNumber(b);
         if (divisor == 0.0) {
             throw DivisionByZeroException("Division by zero");
         }
-        return toNumber(a) / divisor;
+        return finite(toNumber(a) / divisor);
     }
     default: return compare(op_, a, b);
+    }
+}
+
+void BinaryFormula::collectReferences(std::vector<CellRef>& out) const {
+    left_->collectReferences(out);
+    right_->collectReferences(out);
+}
+
+void AggregateFormula::collectReferences(std::vector<CellRef>& out) const {
+    for (const FormulaPtr& arg : args_) {
+        arg->collectReferences(out);
     }
 }
 
@@ -128,7 +156,7 @@ Value SumFormula::evaluate(const CellResolver& cells) const {
     for (double number : numbers(cells)) {
         total += number;
     }
-    return total;
+    return finite(total);
 }
 
 Value AvgFormula::evaluate(const CellResolver& cells) const {
@@ -140,10 +168,16 @@ Value AvgFormula::evaluate(const CellResolver& cells) const {
     for (double number : values) {
         total += number;
     }
-    return total / static_cast<double>(values.size());
+    return finite(finite(total) / static_cast<double>(values.size()));
 }
 
 Value IfFormula::evaluate(const CellResolver& cells) const {
     const bool condition = toNumber(condition_->evaluate(cells)) != 0.0;
     return condition ? whenTrue_->evaluate(cells) : whenFalse_->evaluate(cells);
+}
+
+void IfFormula::collectReferences(std::vector<CellRef>& out) const {
+    condition_->collectReferences(out);
+    whenTrue_->collectReferences(out);
+    whenFalse_->collectReferences(out);
 }

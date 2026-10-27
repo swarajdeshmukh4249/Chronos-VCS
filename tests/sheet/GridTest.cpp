@@ -20,7 +20,9 @@ TEST(cellNamesRoundTrip) {
 }
 
 TEST(rejectsInvalidCellNames) {
-    for (const char* name : {"", "A", "1", "A0", "1A", "A1B", "ABCD1", "A12345678", "A-1", " A1"}) {
+    for (const char* name : {"", "A", "1", "A0", "1A", "A1B", "ABCD1", "A12345678", "A-1", " A1",
+                             // Past Excel's limits (#45)
+                             "XFE1", "ZZZ1", "A1048577", "A9999999"}) {
         CHECK_THROWS(CellRef::parse(name), InvalidCellReferenceException);
     }
 }

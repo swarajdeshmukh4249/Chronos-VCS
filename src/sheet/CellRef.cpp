@@ -7,6 +7,9 @@
 namespace {
 
 // Same limits as Excel: columns up to XFD, rows up to 1,048,576.
+const int kMaxColumns = 16384;
+const int kMaxRows = 1048576;
+// Checked first, so the conversions below can't overflow.
 const std::size_t kMaxColumnLetters = 3;
 const std::size_t kMaxRowDigits = 7;
 
@@ -36,7 +39,7 @@ CellRef CellRef::parse(const std::string& name) {
     for (std::size_t i = letters; i < name.size(); ++i) {
         row = row * 10 + (name[i] - '0');
     }
-    if (row == 0) {
+    if (row == 0 || row > kMaxRows || col > kMaxColumns) {
         throw InvalidCellReferenceException("Invalid cell reference: \"" + name + "\"");
     }
     return CellRef{row - 1, col - 1};
