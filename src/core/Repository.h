@@ -161,6 +161,10 @@ private:
     // Records files as a new commit on top of HEAD and moves HEAD to it.
     const Commit& saveNewCommit(const std::string& message, const std::string& author, Commit::Files files,
                                 int mergedParentId);
+    // The files a three-way merge of commit theirs into HEAD produces, adding any
+    // conflicts to conflicts. Writes nothing, so undo can work out what merge wrote.
+    Commit::Files threeWayMerge(int theirs, const std::string& branch,
+                                std::vector<MergeOutcome::FileConflict>& conflicts) const;
 
     static std::vector<FileDiff> compare(const Commit::Files& before, const Commit::Files& after);
     // Strategy pattern: how to compare one file. Phase 3 adds a cell-by-cell diff for .csv files.

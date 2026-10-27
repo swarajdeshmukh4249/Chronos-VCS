@@ -92,6 +92,28 @@ TEST(undoTakesBackMerges) {
     CHECK(!repo.hasUncommittedChanges());
 }
 
+// #56 review: a half-resolved merge is in no commit, so undo must not throw it away.
+TEST(undoRefusesAfterEditingAConflictedMerge) {
+    TempDir dir;
+    Repository repo = Repository::init(dir.path());
+    writeFile(dir, "budget.txt", "Rent 1000\nFood 300\n");
+    repo.track("budget.txt");
+    repo.commit("first", "Swaraj");
+    repo.createBranch("feature");
+    writeFile(dir, "budget.txt", "Rent 1000\nFood 350\n");
+    repo.commit("food 350", "Swaraj");
+    repo.switchBranch("feature");
+    writeFile(dir, "budget.txt", "Rent 1000\nFood 250\n");
+    repo.commit("food 250", "Tanishka");
+    repo.switchBranch("main");
+
+    undoable(repo, "merge of branch feature", [&] { repo.merge("feature", "Swaraj"); });
+    writeFile(dir, "budget.txt", "Rent 1000\nFood 300, carefully combined\n");
+    CHECK_THROWS(repo.undo(), UncommittedChangesException);
+    CHECK(readFile(dir, "budget.txt") == "Rent 1000\nFood 300, carefully combined\n");
+    CHECK(repo.isMerging());
+}
+
 TEST(undoRefusesToLoseUnsavedEdits) {
     TempDir dir;
     Repository repo = Repository::init(dir.path());

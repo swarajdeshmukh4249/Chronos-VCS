@@ -130,9 +130,12 @@ std::string UndoCommand::describe() const {
 }
 
 int UndoCommand::execute(Repository& repo, std::ostream& out) {
+    const bool mergeWasWaiting = repo.isMerging();
     const std::string undone = repo.undo();
     out << "Undid the " << undone << ". Files and branches are back as they were before it.\n";
-    if (undone.rfind("commit", 0) == 0 || undone.rfind("revert", 0) == 0 || undone.rfind("merge", 0) == 0) {
+    if (mergeWasWaiting && undone.rfind("merge", 0) == 0) {
+        out << "The merge had stopped at conflicts, so no commit was made.\n";
+    } else if (undone.rfind("commit", 0) == 0 || undone.rfind("revert", 0) == 0 || undone.rfind("merge", 0) == 0) {
         out << "The commit itself is still saved; see chrono log --all.\n";
     }
     return 0;
