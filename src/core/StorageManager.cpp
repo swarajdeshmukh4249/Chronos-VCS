@@ -173,6 +173,7 @@ void StorageManager::initialize() const {
     }
     fs::create_directories(folder_ / "commits");
     saveTracked({});
+    saveHead(0);
 }
 
 void StorageManager::saveCommit(const Commit& commit) const {
@@ -214,6 +215,19 @@ void StorageManager::saveTracked(const std::set<std::string>& paths) const {
         content += path + "\n";
     }
     writeFile(folder_ / "tracked", content);
+}
+
+void StorageManager::saveHead(int id) const {
+    writeFile(folder_ / "HEAD", std::to_string(id) + "\n");
+}
+
+int StorageManager::loadHead() const {
+    std::string text = readFile(folder_ / "HEAD");
+    while (!text.empty() && (text.back() == '\n' || text.back() == '\r')) {
+        text.pop_back();
+    }
+    CommitReader reader(text, "HEAD");
+    return static_cast<int>(reader.number(text));
 }
 
 std::set<std::string> StorageManager::loadTracked() const {

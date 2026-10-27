@@ -9,6 +9,7 @@
 
 // Everything under .chrono/ is read and written here, so Repository never
 // deals with file formats. Files are plain text so they can be opened and read:
+//   .chrono/HEAD             id of the commit the working files came from (0 = none yet)
 //   .chrono/tracked          one tracked path per line
 //   .chrono/commits/<id>.txt one commit (see StorageManager.cpp for the format)
 class StorageManager {
@@ -32,6 +33,10 @@ public:
 
     void saveTracked(const std::set<std::string>& paths) const;
     std::set<std::string> loadTracked() const;
+
+    void saveHead(int id) const;
+    // Throws CorruptObjectException if HEAD is missing or not a number.
+    int loadHead() const;
 
 private:
     std::filesystem::path folder_;

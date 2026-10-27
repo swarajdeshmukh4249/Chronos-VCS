@@ -33,6 +33,12 @@ public:
     using ChronoException::ChronoException;
 };
 
+// Checking out would overwrite edits that were never committed.
+class UncommittedChangesException : public ChronoException {
+public:
+    using ChronoException::ChronoException;
+};
+
 // A file the user named does not exist in the working directory.
 class FileNotFoundException : public ChronoException {
 public:

@@ -98,3 +98,93 @@ TEST(repositoryTracksFilesInSubfolders) {
     repo.commit("budget", "Swaraj");
     CHECK(repo.getCommit(1).findFile("data/budget.csv")->getContent() == readFile(dir, "data/budget.csv"));
 }
+
+// Issue #6
+TEST(checkoutPutsOldFilesBack) {
+    TempDir dir;
+    Repository repo = Repository::init(dir.path());
+    writeFile(dir, "notes.txt", "version 1");
+    repo.track("notes.txt");
+    repo.commit("first", "Swaraj");
+    writeFile(dir, "notes.txt", "version 2");
+    writeFile(dir, "extra.txt", "added later");
+    repo.track("extra.txt");
+    repo.commit("second", "Swaraj");
+
+    repo.checkout(1);
+    CHECK(readFile(dir, "notes.txt") == "version 1");
+    CHECK(!WorkingTree(dir.path()).exists("extra.txt"));
+    CHECK(repo.log().size() == 2);
+
+    repo.checkout(2);
+    CHECK(readFile(dir, "notes.txt") == "version 2");
+    CHECK(readFile(dir, "extra.txt") == "added later");
+}
+
+TEST(checkoutProtectsUncommittedWork) {
+    TempDir dir;
+    Repository repo = Repository::init(dir.path());
+    writeFile(dir, "notes.txt", "version 1");
+    repo.track("notes.txt");
+    repo.commit("first", "Swaraj");
+    writeFile(dir, "notes.txt", "unsaved edit");
+    CHECK(repo.hasUncommittedChanges());
+    CHECK_THROWS(repo.checkout(1), UncommittedChangesException);
+    CHECK(readFile(dir, "notes.txt") == "unsaved edit");
+    CHECK_THROWS(repo.checkout(9), CommitNotFoundException);
+}
+
+TEST(revertRecordsANewCommit) {
+    TempDir dir;
+    Repository repo = Repository::init(dir.path());
+    writeFile(dir, "notes.txt", "version 1");
+    repo.track("notes.txt");
+    repo.commit("first", "Swaraj");
+    writeFile(dir, "notes.txt", "version 2");
+    repo.commit("second", "Swaraj");
+    writeFile(dir, "notes.txt", "version 3");
+    repo.commit("third", "Swaraj");
+
+    const Commit& reverted = repo.revert(1, "Swaraj");
+    CHECK(reverted.getId() == 4);
+    CHECK(reverted.getParentId() == 3);
+    CHECK(reverted.getMessage() == "Revert to #1: first");
+    CHECK(readFile(dir, "notes.txt") == "version 1");
+    CHECK(!repo.hasUncommittedChanges());
+    CHECK_THROWS(repo.revert(4, "Swaraj"), NothingToCommitException);
+}
+
+TEST(headIsRememberedBetweenRuns) {
+    TempDir dir;
+    {
+        Repository repo = Repository::init(dir.path());
+        CHECK(repo.getHead() == 0);
+        writeFile(dir, "notes.txt", "version 1");
+        repo.track("notes.txt");
+        repo.commit("first", "Swaraj");
+        writeFile(dir, "notes.txt", "version 2");
+        repo.commit("second", "Swaraj");
+        repo.checkout(1);
+    }
+    Repository reopened = Repository::open(dir.path());
+    CHECK(reopened.getHead() == 1);
+    CHECK(!reopened.hasUncommittedChanges());
+    reopened.checkout(2);
+    CHECK(readFile(dir, "notes.txt") == "version 2");
+}
+
+TEST(commitAfterCheckoutUsesHeadAsParent) {
+    TempDir dir;
+    Repository repo = Repository::init(dir.path());
+    writeFile(dir, "notes.txt", "version 1");
+    repo.track("notes.txt");
+    repo.commit("first", "Swaraj");
+    writeFile(dir, "notes.txt", "version 2");
+    repo.commit("second", "Swaraj");
+    repo.checkout(1);
+    writeFile(dir, "notes.txt", "another idea");
+    const Commit& third = repo.commit("try another idea", "Swaraj");
+    CHECK(third.getId() == 3);
+    CHECK(third.getParentId() == 1);
+    CHECK(repo.getHead() == 3);
+}

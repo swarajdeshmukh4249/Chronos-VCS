@@ -122,3 +122,14 @@ TEST(findRootSearchesParentFolders) {
     TempDir empty;
     CHECK_THROWS(StorageManager::findRoot(empty.path()), RepositoryNotFoundException);
 }
+
+TEST(storageRoundTripsHead) {
+    TempDir dir;
+    StorageManager storage(dir.path());
+    storage.initialize();
+    CHECK(storage.loadHead() == 0);
+    storage.saveHead(12);
+    CHECK(storage.loadHead() == 12);
+    overwrite(dir.path() / ".chrono" / "HEAD", "abc\n");
+    CHECK_THROWS(storage.loadHead(), CorruptObjectException);
+}
