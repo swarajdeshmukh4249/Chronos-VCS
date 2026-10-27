@@ -4,26 +4,30 @@
 #include <cctype>
 #include <fstream>
 #include <limits>
+#include <map>
 #include <sstream>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 #include "common/Exceptions.h"
+#include "core/ContentHash.h"
 
 namespace fs = std::filesystem;
 
 namespace {
 
-// A commit file looks like this. Lengths are in bytes, so messages and file
-// contents can hold any text, including newlines. Each block ends with '\n'.
+// A commit file looks like this. The message length is in bytes, so a message
+// can hold any text, including newlines. Each file names the object holding its
+// content, and "check" is the hash of everything after the first line.
+//   check 3b0f6a51c2d47e98
 //   id 3
 //   parent 2
 //   author Swaraj
 //   time 1793015606
 //   message 12
 //   fixed totals
-//   file 5 notes.txt
-//   hello
+//   file af63dc4c8601ec8c notes.txt
 
 std::string readFile(const fs::path& path) {
     std::ifstream in(path, std::ios::binary);
@@ -58,6 +62,7 @@ public:
     CommitReader(const std::string& text, std::string name) : text_(text), name_(std::move(name)) {}
 
     bool atEnd() const { return pos_ == text_.size(); }
+    std::size_t position() const { return pos_; }
 
     // The rest of a "key value" line, after checking the key.
     std::string field(const std::string& key) {
@@ -123,39 +128,61 @@ std::string formatCommit(const Commit& commit) {
             c = ' ';
         }
     }
-    std::ostringstream out;
-    out << "id " << commit.getId() << "\n"
-        << "parent " << commit.getParentId() << "\n"
-        << "author " << author << "\n"
-        << "time " << static_cast<long long>(commit.getTimestamp()) << "\n"
-        << "message " << commit.getMessage().size() << "\n"
-        << commit.getMessage() << "\n";
+    std::ostringstream body;
+    body << "id " << commit.getId() << "\n"
+         << "parent " << commit.getParentId() << "\n"
+         << "author " << author << "\n"
+         << "time " << static_cast<long long>(commit.getTimestamp()) << "\n"
+         << "message " << commit.getMessage().size() << "\n"
+         << commit.getMessage() << "\n";
     for (const auto& [path, snapshot] : commit.getFiles()) {
-        out << "file " << snapshot.getContent().size() << " " << path << "\n" << snapshot.getContent() << "\n";
+        body << "file " << contentHash(snapshot.getContent()) << " " << path << "\n";
     }
-    return out.str();
+    return "check " + contentHash(body.str()) + "\n" + body.str();
 }
 
-Commit parseCommit(const std::string& text, const std::string& name) {
-    CommitReader reader(text, name);
-    const int id = reader.smallNumber(reader.field("id"));
-    const int parentId = reader.smallNumber(reader.field("parent"));
-    std::string author = reader.field("author");
-    const auto timestamp = static_cast<std::time_t>(reader.number(reader.field("time")));
-    std::string message = reader.block(static_cast<std::size_t>(reader.number(reader.field("message"))));
+// What a commit file says, before the file contents are read from objects/.
+struct CommitRecord {
+    int id = 0;
+    int parentId = 0;
+    std::string author;
+    std::time_t timestamp = 0;
+    std::string message;
+    std::vector<std::pair<std::string, std::string>> files;  // path, content hash
+    bool checksumMatches = false;
+};
 
-    Commit::Files files;
+CommitRecord parseCommitRecord(const std::string& text, const std::string& name) {
+    CommitReader reader(text, name);
+    CommitRecord record;
+    const std::string checksum = reader.field("check");
+    if (!isContentHash(checksum)) {
+        reader.fail("\"" + checksum + "\" is not a checksum");
+    }
+    record.checksumMatches = contentHash(text.substr(reader.position())) == checksum;
+    record.id = reader.smallNumber(reader.field("id"));
+    record.parentId = reader.smallNumber(reader.field("parent"));
+    record.author = reader.field("author");
+    record.timestamp = static_cast<std::time_t>(reader.number(reader.field("time")));
+    record.message = reader.block(static_cast<std::size_t>(reader.number(reader.field("message"))));
+
     while (!reader.atEnd()) {
-        const std::string header = reader.field("file");
-        const std::size_t space = header.find(' ');
-        if (space == std::string::npos || space + 1 == header.size()) {
+        const std::string entry = reader.field("file");
+        const std::size_t space = entry.find(' ');
+        if (space == std::string::npos || space + 1 == entry.size()) {
             reader.fail("a file entry has no path");
         }
-        const auto length = static_cast<std::size_t>(reader.number(header.substr(0, space)));
-        std::string path = header.substr(space + 1);
-        files.emplace(path, Snapshot(path, reader.block(length)));
+        const std::string hash = entry.substr(0, space);
+        if (!isContentHash(hash)) {
+            reader.fail("\"" + hash + "\" is not a content hash");
+        }
+        record.files.emplace_back(entry.substr(space + 1), hash);
     }
-    return Commit(id, parentId, std::move(author), std::move(message), timestamp, std::move(files));
+    return record;
+}
+
+std::string objectName(const std::string& hash) {
+    return std::string(StorageManager::kFolderName) + "/objects/" + hash;
 }
 
 // The id in a commit file name such as "12.txt", or 0 for any other file.
@@ -199,15 +226,110 @@ void StorageManager::initialize() const {
         throw RepositoryExistsException("A Chrono repository already exists here");
     }
     fs::create_directories(folder_ / "commits");
+    fs::create_directories(folder_ / "objects");
     saveTracked({});
     saveHead(0);
 }
 
 void StorageManager::saveCommit(const Commit& commit) const {
-    writeFile(folder_ / "commits" / (std::to_string(commit.getId()) + ".txt"), formatCommit(commit));
+    std::error_code ignored;
+    fs::create_directories(folder_ / "objects", ignored);
+    for (const auto& [path, snapshot] : commit.getFiles()) {
+        // Identical content has the same hash, so each version of a file is stored once.
+        const std::string hash = contentHash(snapshot.getContent());
+        const fs::path object = folder_ / "objects" / hash;
+        if (!fs::exists(object)) {
+            writeFile(object, snapshot.getContent());
+            continue;
+        }
+        // Check the stored copy, so a new commit never points at a damaged one.
+        const std::string stored = readFile(object);
+        if (stored == snapshot.getContent()) {
+            continue;
+        }
+        if (contentHash(stored) == hash) {
+            throw CorruptObjectException("Two different versions of " + path + " have the same hash " + hash +
+                                         ", so Chrono can't store both");
+        }
+        writeFile(object, snapshot.getContent());
+    }
+    writeFile(commitPath(commit.getId()), formatCommit(commit));
 }
 
 History<Commit> StorageManager::loadCommits() const {
+    History<Commit> history;
+    const int highest = highestCommitId();
+    for (int id = 1; id <= highest; ++id) {
+        const std::string name = commitName(id);
+        if (!fs::is_regular_file(commitPath(id))) {
+            throw CorruptObjectException(name + " is missing");
+        }
+        CommitRecord record = parseCommitRecord(readFile(commitPath(id)), name);
+        if (record.id != id) {
+            throw CorruptObjectException(name + " is damaged: it says it is commit " + std::to_string(record.id));
+        }
+        Commit::Files files;
+        for (const auto& [path, hash] : record.files) {
+            const fs::path object = folder_ / "objects" / hash;
+            if (!fs::is_regular_file(object)) {
+                throw CorruptObjectException(name + " is damaged: the saved copy of " + path + " (" +
+                                             objectName(hash) + ") is missing");
+            }
+            files.emplace(path, Snapshot(path, readFile(object)));
+        }
+        history.append(Commit(record.id, record.parentId, std::move(record.author), std::move(record.message),
+                              record.timestamp, std::move(files)));
+    }
+    return history;
+}
+
+IntegrityReport StorageManager::verify() const {
+    IntegrityReport report;
+    std::map<std::string, bool> intactObjects;
+    const int highest = highestCommitId();
+    for (int id = 1; id <= highest; ++id) {
+        const std::string file = std::string(kFolderName) + "/commits/" + std::to_string(id) + ".txt";
+        const std::string commit = "commit #" + std::to_string(id);
+        if (!fs::is_regular_file(commitPath(id))) {
+            report.problems.push_back({file, "is missing"});
+            continue;
+        }
+        CommitRecord record;
+        try {
+            record = parseCommitRecord(readFile(commitPath(id)), commitName(id));
+        } catch (const CorruptObjectException& e) {
+            // The message starts with the commit's name; the report already shows the file.
+            const std::string what = e.what();
+            const std::size_t damaged = what.find("is damaged");
+            report.problems.push_back({file, damaged == std::string::npos ? what : what.substr(damaged)});
+            continue;
+        }
+        ++report.commits;
+        if (!record.checksumMatches) {
+            report.problems.push_back({file, "was edited after it was saved (" + commit + ")"});
+        }
+
+        for (const auto& [path, hash] : record.files) {
+            auto known = intactObjects.find(hash);
+            if (known != intactObjects.end()) {
+                continue;
+            }
+            const fs::path object = folder_ / "objects" / hash;
+            bool intact = fs::is_regular_file(object);
+            if (!intact) {
+                report.problems.push_back({objectName(hash), "is missing (" + path + " in " + commit + ")"});
+            } else if (contentHash(readFile(object)) != hash) {
+                intact = false;
+                report.problems.push_back({objectName(hash), "was changed (" + path + " in " + commit + ")"});
+            }
+            intactObjects.emplace(hash, intact);
+        }
+    }
+    report.objects = static_cast<int>(intactObjects.size());
+    return report;
+}
+
+int StorageManager::highestCommitId() const {
     // Only names like "12.txt" are commits, so a stray backup or copied-in file is ignored.
     int highest = 0;
     std::error_code error;
@@ -217,23 +339,15 @@ History<Commit> StorageManager::loadCommits() const {
     if (error) {
         throw CorruptObjectException("Could not list " + (folder_ / "commits").string());
     }
+    return highest;
+}
 
-    History<Commit> history;
-    for (int id = 1; id <= highest; ++id) {
-        const std::string file = std::string(kFolderName) + "/commits/" + std::to_string(id) + ".txt";
-        const std::string name = "Commit " + std::to_string(id) + " (" + file + ")";
-        const fs::path path = folder_ / "commits" / (std::to_string(id) + ".txt");
-        if (!fs::is_regular_file(path)) {
-            throw CorruptObjectException(name + " is missing");
-        }
-        Commit commit = parseCommit(readFile(path), name);
-        if (commit.getId() != id) {
-            throw CorruptObjectException(name + " is damaged: it says it is commit " +
-                                         std::to_string(commit.getId()));
-        }
-        history.append(std::move(commit));
-    }
-    return history;
+fs::path StorageManager::commitPath(int id) const {
+    return folder_ / "commits" / (std::to_string(id) + ".txt");
+}
+
+std::string StorageManager::commitName(int id) {
+    return "Commit " + std::to_string(id) + " (" + kFolderName + "/commits/" + std::to_string(id) + ".txt)";
 }
 
 void StorageManager::saveTracked(const std::set<std::string>& paths) const {

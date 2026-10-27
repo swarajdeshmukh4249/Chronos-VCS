@@ -6,6 +6,7 @@
 
 #include "TempDir.h"
 #include "common/Exceptions.h"
+#include "core/ContentHash.h"
 #include "core/StorageManager.h"
 #include "core/WorkingTree.h"
 
@@ -22,6 +23,11 @@ Commit sampleCommit(int id, const std::string& content) {
 
 void overwrite(const fs::path& path, const std::string& content) {
     std::ofstream(path, std::ios::binary | std::ios::trunc) << content;
+}
+
+// A commit file body with a valid "check" line, so tests reach the part they're about.
+std::string withChecksum(const std::string& body) {
+    return "check " + contentHash(body) + "\n" + body;
 }
 
 }  // namespace
@@ -94,13 +100,13 @@ TEST(storageDetectsDamagedCommits) {
     storage.saveCommit(sampleCommit(1, "first"));
     const fs::path file = dir.path() / ".chrono" / "commits" / "1.txt";
 
-    overwrite(file, "id 1\nparent 0\nauthor Swaraj\n");
+    overwrite(file, withChecksum("id 1\nparent 0\nauthor Swaraj\n"));
     CHECK_THROWS(storage.loadCommits(), CorruptObjectException);
 
-    overwrite(file, "id 1\nparent 0\nauthor Swaraj\ntime 5\nmessage 50\nshort\n");
+    overwrite(file, withChecksum("id 1\nparent 0\nauthor Swaraj\ntime 5\nmessage 50\nshort\n"));
     CHECK_THROWS(storage.loadCommits(), CorruptObjectException);
 
-    overwrite(file, "id 7\nparent 0\nauthor Swaraj\ntime 5\nmessage 2\nhi\n");
+    overwrite(file, withChecksum("id 7\nparent 0\nauthor Swaraj\ntime 5\nmessage 2\nhi\n"));
     CHECK_THROWS(storage.loadCommits(), CorruptObjectException);
 }
 
@@ -141,7 +147,7 @@ TEST(storageRejectsOversizedNumbers) {
     storage.initialize();
     storage.saveCommit(sampleCommit(1, "first"));
     overwrite(dir.path() / ".chrono" / "commits" / "1.txt",
-              "id 99999999999\nparent 0\nauthor Swaraj\ntime 5\nmessage 2\nhi\n");
+              withChecksum("id 99999999999\nparent 0\nauthor Swaraj\ntime 5\nmessage 2\nhi\n"));
     CHECK_THROWS(storage.loadCommits(), CorruptObjectException);
     overwrite(dir.path() / ".chrono" / "HEAD", "99999999999\n");
     CHECK_THROWS(storage.loadHead(), CorruptObjectException);
@@ -174,4 +180,129 @@ TEST(storageErrorsNameTheDamagedFile) {
         message = e.what();
     }
     CHECK(message.find(".chrono/commits/2.txt") != std::string::npos);
+}
+
+namespace {
+
+int objectCount(const TempDir& dir) {
+    int count = 0;
+    for (const auto& entry : fs::directory_iterator(dir.path() / ".chrono" / "objects")) {
+        (void)entry;
+        ++count;
+    }
+    return count;
+}
+
+std::string replaceOnce(std::string text, const std::string& from, const std::string& to) {
+    text.replace(text.find(from), from.size(), to);
+    return text;
+}
+
+std::string readAll(const fs::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
+}  // namespace
+
+// Issue #9
+TEST(storageKeepsEachContentOnce) {
+    TempDir dir;
+    StorageManager storage(dir.path());
+    storage.initialize();
+    storage.saveCommit(sampleCommit(1, "same"));
+    storage.saveCommit(sampleCommit(2, "same"));
+    storage.saveCommit(sampleCommit(3, "different"));
+    // notes.txt "same", notes.txt "different", and one shared budget.csv.
+    CHECK(objectCount(dir) == 3);
+    CHECK(storage.loadCommits().at(2).findFile("notes.txt")->getContent() == "same");
+}
+
+TEST(storageRepairsADamagedObjectOnSave) {
+    TempDir dir;
+    StorageManager storage(dir.path());
+    storage.initialize();
+    storage.saveCommit(sampleCommit(1, "same"));
+    const fs::path object = dir.path() / ".chrono" / "objects" / contentHash("same");
+    overwrite(object, "damaged");
+    storage.saveCommit(sampleCommit(2, "same"));
+    CHECK(readAll(object) == "same");
+    CHECK(storage.verify().problems.empty());
+}
+
+TEST(storageReportsMissingObjectsWhenLoading) {
+    TempDir dir;
+    StorageManager storage(dir.path());
+    storage.initialize();
+    storage.saveCommit(sampleCommit(1, "first"));
+    fs::remove(dir.path() / ".chrono" / "objects" / contentHash("first"));
+    CHECK_THROWS(storage.loadCommits(), CorruptObjectException);
+}
+
+TEST(storageRejectsBadObjectNames) {
+    TempDir dir;
+    StorageManager storage(dir.path());
+    storage.initialize();
+    storage.saveCommit(sampleCommit(1, "first"));
+    overwrite(dir.path() / ".chrono" / "commits" / "1.txt",
+              withChecksum("id 1\nparent 0\nauthor Swaraj\ntime 5\nmessage 2\nhi\nfile ../../secret notes.txt\n"));
+    CHECK_THROWS(storage.loadCommits(), CorruptObjectException);
+}
+
+// Issue #10
+TEST(verifyPassesForAnIntactRepository) {
+    TempDir dir;
+    StorageManager storage(dir.path());
+    storage.initialize();
+    storage.saveCommit(sampleCommit(1, "first"));
+    storage.saveCommit(sampleCommit(2, "second"));
+    const IntegrityReport report = storage.verify();
+    CHECK(report.problems.empty());
+    CHECK(report.commits == 2);
+    CHECK(report.objects == 3);
+}
+
+TEST(verifyNamesAChangedObject) {
+    TempDir dir;
+    StorageManager storage(dir.path());
+    storage.initialize();
+    storage.saveCommit(sampleCommit(1, "first"));
+    storage.saveCommit(sampleCommit(2, "second"));
+    overwrite(dir.path() / ".chrono" / "objects" / contentHash("second"), "secOnd");
+
+    const IntegrityReport report = storage.verify();
+    CHECK(report.problems.size() == 1);
+    CHECK(report.problems[0].file == ".chrono/objects/" + contentHash("second"));
+    CHECK(report.problems[0].problem.find("notes.txt in commit #2") != std::string::npos);
+}
+
+TEST(verifyNamesAnEditedCommit) {
+    TempDir dir;
+    StorageManager storage(dir.path());
+    storage.initialize();
+    storage.saveCommit(sampleCommit(1, "first"));
+    const fs::path file = dir.path() / ".chrono" / "commits" / "1.txt";
+    overwrite(file, replaceOnce(readAll(file), "author Swaraj", "author Someone"));
+
+    const IntegrityReport report = storage.verify();
+    CHECK(report.problems.size() == 1);
+    CHECK(report.problems[0].file == ".chrono/commits/1.txt");
+    CHECK(report.problems[0].problem.find("edited") != std::string::npos);
+}
+
+TEST(verifyReportsMissingAndUnreadableFiles) {
+    TempDir dir;
+    StorageManager storage(dir.path());
+    storage.initialize();
+    storage.saveCommit(sampleCommit(1, "first"));
+    storage.saveCommit(sampleCommit(2, "second"));
+    storage.saveCommit(sampleCommit(3, "third"));
+    fs::remove(dir.path() / ".chrono" / "objects" / contentHash("first"));
+    overwrite(dir.path() / ".chrono" / "commits" / "2.txt", "garbage");
+    fs::remove(dir.path() / ".chrono" / "commits" / "3.txt");
+    storage.saveCommit(sampleCommit(4, "fourth"));
+
+    const IntegrityReport report = storage.verify();
+    CHECK(report.problems.size() == 3);
+    CHECK(report.commits == 2);
 }

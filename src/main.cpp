@@ -21,6 +21,7 @@ const char* const kUsage =
     "  log                   list commits, newest first\n"
     "  show <id>             show one commit's details and files\n"
     "  status                show whether there are uncommitted changes\n"
+    "  verify                check that no saved history was changed or lost\n"
     "  checkout <id>         put the files from a commit back\n"
     "  revert <id>           put a commit's files back and record it as a new commit\n";
 
@@ -58,6 +59,21 @@ int run(const std::vector<std::string>& args) {
         const Repository repo = Repository::init(fs::current_path());
         std::cout << "Started a Chrono repository in " << repo.getRoot().string() << "\n";
         return 0;
+    }
+
+    // Runs before opening the repository, because opening stops at the first damaged commit.
+    if (command == "verify" && args.size() == 1) {
+        const IntegrityReport report = StorageManager(StorageManager::findRoot(fs::current_path())).verify();
+        if (report.problems.empty()) {
+            std::cout << "All " << report.commits << " commits and " << report.objects
+                      << " saved file versions are intact\n";
+            return 0;
+        }
+        std::cout << "Found " << report.problems.size() << (report.problems.size() == 1 ? " problem:\n" : " problems:\n");
+        for (const IntegrityProblem& problem : report.problems) {
+            std::cout << "  " << problem.file << " " << problem.problem << "\n";
+        }
+        return 1;
     }
 
     Repository repo = Repository::open(fs::current_path());
