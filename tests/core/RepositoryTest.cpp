@@ -409,7 +409,8 @@ TEST(mergeCombinesChangesFromBothBranches) {
     repo.commit("add gym", "Tanishka");  // #3 on feature
     repo.switchBranch("main");
 
-    const MergeOutcome outcome = repo.merge("feature", "Swaraj");
+    // Names ignore case, and the message uses the branch's own spelling.
+    const MergeOutcome outcome = repo.merge("Feature", "Swaraj");
     CHECK(outcome.kind == MergeOutcome::Kind::Merged);
     CHECK(outcome.conflicts.empty());
     CHECK(readFile(dir, "budget.txt") == "Rent 1100\nFood 300\nGym 40\n");

@@ -101,19 +101,17 @@ const Commit& Repository::saveNewCommit(const std::string& message, const std::s
     return commits_.latest();
 }
 
-MergeOutcome Repository::merge(const std::string& branch, const std::string& author) {
+MergeOutcome Repository::merge(const std::string& name, const std::string& author) {
     if (isMerging()) {
         throw MergeConflictException("A merge with \"" + pending_.branch +
                                      "\" is waiting. Fix the conflicts and commit, or abort it first.");
     }
-    auto it = branches_.find(branch);
-    if (it == branches_.end()) {
-        throw BranchNotFoundException("There is no branch named \"" + branch + "\"");
-    }
+    const Branch& found = findBranch(name);
+    const std::string branch = found.getName();
     requireNoUncommittedChanges();
 
     MergeOutcome outcome;
-    const int theirs = it->second.getCommitId();
+    const int theirs = found.getCommitId();
     if (theirs == 0 || theirs == head_ || (head_ != 0 && ancestorsOf(head_).count(theirs))) {
         outcome.kind = MergeOutcome::Kind::AlreadyUpToDate;
         outcome.commitId = head_;
