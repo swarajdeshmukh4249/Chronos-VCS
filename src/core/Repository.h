@@ -51,8 +51,15 @@ public:
 
     // Every commit on every branch, oldest first.
     const History<Commit>& log() const { return commits_; }
-    // Ids of the commits that led to HEAD, following parents, newest first.
+    // Ids of the commits that led to HEAD, through both parents of merges, newest first.
     std::vector<int> historyOfHead() const;
+    // Every commit reachable from id through either parent, including id itself.
+    // Throws CommitNotFoundException.
+    std::set<int> ancestorsOf(int id) const;
+    // The newest commit both a and b grew from, or 0 if they share none. A parent
+    // always has a smaller id than its child, so this is the common ancestor with
+    // the highest id. Throws CommitNotFoundException.
+    int mergeBase(int a, int b) const;
     // Throws CommitNotFoundException.
     const Commit& getCommit(int id) const;
 

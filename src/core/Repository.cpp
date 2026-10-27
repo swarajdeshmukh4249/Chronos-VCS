@@ -76,11 +76,38 @@ const Commit& Repository::commit(const std::string& message, const std::string& 
 }
 
 std::vector<int> Repository::historyOfHead() const {
-    std::vector<int> ids;
-    for (int id = head_; id != 0; id = getCommit(id).getParentId()) {
-        ids.push_back(id);
+    if (head_ == 0) {
+        return {};
     }
-    return ids;
+    const std::set<int> ancestors = ancestorsOf(head_);
+    return std::vector<int>(ancestors.rbegin(), ancestors.rend());
+}
+
+std::set<int> Repository::ancestorsOf(int id) const {
+    std::set<int> seen;
+    std::vector<int> stack{id};
+    while (!stack.empty()) {
+        const int current = stack.back();
+        stack.pop_back();
+        if (current == 0 || !seen.insert(current).second) {
+            continue;
+        }
+        const Commit& commit = getCommit(current);
+        stack.push_back(commit.getParentId());
+        stack.push_back(commit.getMergedParentId());
+    }
+    return seen;
+}
+
+int Repository::mergeBase(int a, int b) const {
+    const std::set<int> ofA = ancestorsOf(a);
+    const std::set<int> ofB = ancestorsOf(b);
+    for (auto it = ofA.rbegin(); it != ofA.rend(); ++it) {
+        if (ofB.count(*it)) {
+            return *it;
+        }
+    }
+    return 0;
 }
 
 std::vector<Branch> Repository::getBranches() const {

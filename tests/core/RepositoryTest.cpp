@@ -331,3 +331,30 @@ TEST(checkoutLeavesTheBranch) {
     CHECK(readFile(dir, "notes.txt") == "v2\n");
     CHECK(repo.getCurrentBranch() == "main");
 }
+
+// Issue #12
+TEST(mergeBaseFindsWhereBranchesSplit) {
+    TempDir dir;
+    Repository repo = Repository::init(dir.path());
+    writeFile(dir, "notes.txt", "v1\n");
+    repo.track("notes.txt");
+    repo.commit("1 on main", "Swaraj");                  // #1
+    writeFile(dir, "notes.txt", "v2\n");
+    repo.commit("2 on main", "Swaraj");                  // #2
+    repo.createBranch("feature");
+    writeFile(dir, "notes.txt", "v3\n");
+    repo.commit("3 on main", "Swaraj");                  // #3
+    repo.switchBranch("feature");
+    writeFile(dir, "notes.txt", "f1\n");
+    repo.commit("4 on feature", "Tanishka");             // #4
+    writeFile(dir, "notes.txt", "f2\n");
+    repo.commit("5 on feature", "Tanishka");             // #5
+
+    CHECK(repo.mergeBase(3, 5) == 2);
+    CHECK(repo.mergeBase(5, 3) == 2);
+    CHECK(repo.mergeBase(4, 5) == 4);  // 4 is an ancestor of 5
+    CHECK(repo.mergeBase(5, 5) == 5);
+    CHECK(repo.mergeBase(1, 3) == 1);
+    CHECK(repo.ancestorsOf(5) == (std::set<int>{1, 2, 4, 5}));
+    CHECK_THROWS(repo.mergeBase(1, 9), CommitNotFoundException);
+}
