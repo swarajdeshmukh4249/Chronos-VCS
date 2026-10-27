@@ -21,6 +21,13 @@ std::vector<CellRef> refs(std::initializer_list<const char*> names) {
     return result;
 }
 
+// {"A1", "A2:B3"} as the strings dependenciesOf's ranges print as.
+std::vector<std::string> names(const std::vector<CellRange>& ranges) {
+    std::vector<std::string> result;
+    for (const CellRange& range : ranges) result.push_back(range.toString());
+    return result;
+}
+
 std::size_t position(const std::vector<CellRef>& order, const char* name) {
     return static_cast<std::size_t>(std::find(order.begin(), order.end(), at(name)) - order.begin());
 }
@@ -46,9 +53,9 @@ TEST(listsWhatEachCellDependsOn) {
     grid.set("E1", "=IF(C1>5, \"big\", D1)");
     DependencyGraph graph(grid);
 
-    CHECK(graph.dependenciesOf(at("C1")) == refs({"A1", "B1"}));
-    CHECK(graph.dependenciesOf(at("D1")) == refs({"A1", "B1", "A2", "B2"}));
-    CHECK(graph.dependenciesOf(at("E1")) == refs({"C1", "D1"}));
+    CHECK(names(graph.dependenciesOf(at("C1"))) == std::vector<std::string>({"A1", "B1"}));
+    CHECK(names(graph.dependenciesOf(at("D1"))) == std::vector<std::string>({"A1:B2"}));
+    CHECK(names(graph.dependenciesOf(at("E1"))) == std::vector<std::string>({"C1", "D1"}));
     CHECK(graph.dependenciesOf(at("A1")).empty());
     CHECK(graph.hasFormula(at("C1")));
     CHECK(!graph.hasFormula(at("A1")));
@@ -94,6 +101,43 @@ TEST(evaluationOrderPutsDependenciesFirst) {
     CHECK(all.size() == 4);
     CHECK(position(all, "B1") < position(all, "C1"));
     CHECK(position(all, "C1") < position(all, "D1"));
+}
+
+// Ranges stay ranges, so who reads a cell is answered by containment.
+TEST(rangeReadersIncludeEmptyCellsInsideTheRange) {
+    Grid<Cell> grid;
+    grid.set("B2", 5);
+    grid.set("C1", "=SUM(B2:B9)");
+    grid.set("D1", "=B7*2");
+    grid.set("E1", "=C1+1");
+    DependencyGraph graph(grid);
+
+    CHECK(graph.dependentsOf(at("B7")) == refs({"C1", "D1"}));  // B7 is empty but inside B2:B9
+    CHECK(graph.dependentsOf(at("B10")).empty());
+    CHECK(graph.affectedBy(at("B3")) == std::set<CellRef>({at("C1"), at("E1")}));
+}
+
+TEST(formulasInsideARangeAreEvaluatedFirst) {
+    Grid<Cell> grid;
+    grid.set("A1", "=SUM(A2:A1048576)");
+    grid.set("A5", "=A6*2");
+    grid.set("A6", 3);
+    DependencyGraph graph(grid);
+    CHECK(graph.evaluationOrder(at("A1")) == refs({"A5", "A1"}));
+}
+
+TEST(wholeColumnRangesAreCheap) {
+    Grid<Cell> grid;
+    for (int row = 1; row <= 1000; ++row) {
+        grid.set(CellRef{row, 0}, row);
+    }
+    for (int col = 1; col <= 200; ++col) {
+        grid.set(CellRef{0, col}, "=SUM(A2:Z1048576)");
+    }
+    // Before ranges were kept whole, this graph held 200 x 27 million entries.
+    DependencyGraph graph(grid);
+    CHECK(graph.dependentsOf(at("Z1048576")).size() == 200);
+    CHECK(graph.evaluationOrder().size() == 200);
 }
 
 TEST(evaluationOrderSkipsCellsAlreadyDone) {

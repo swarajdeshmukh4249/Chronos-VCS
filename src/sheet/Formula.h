@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "sheet/CellRange.h"
 #include "sheet/CellRef.h"
 #include "sheet/Value.h"
 
@@ -11,6 +12,10 @@
 class CellResolver {
 public:
     virtual Value valueAt(const CellRef& ref) const = 0;
+    // The cells in range that may hold something, in row order. Empty cells add
+    // nothing to SUM or AVG, so a resolver that knows which cells are set can leave
+    // the rest out; this default lists every cell.
+    virtual std::vector<CellRef> cellsIn(const CellRange& range) const;
     virtual ~CellResolver() = default;
 };
 
@@ -18,10 +23,11 @@ public:
 class Formula {
 public:
     virtual Value evaluate(const CellResolver& cells) const = 0;
-    // The values this node adds to a function's argument list; a range adds one per cell.
+    // The values this node adds to a function's argument list; a range adds one per
+    // cell that holds something.
     virtual void collectValues(const CellResolver& cells, std::vector<Value>& out) const;
-    // Every cell this formula reads, including each cell of a range.
-    virtual void collectReferences(std::vector<CellRef>& out) const { (void)out; }
+    // What this formula reads: one entry per reference, with a range kept whole.
+    virtual void collectReferences(std::vector<CellRange>& out) const { (void)out; }
     virtual ~Formula() = default;
 };
 
@@ -49,7 +55,7 @@ class ReferenceFormula : public Formula {
 public:
     explicit ReferenceFormula(CellRef ref) : ref_(ref) {}
     Value evaluate(const CellResolver& cells) const override;
-    void collectReferences(std::vector<CellRef>& out) const override { out.push_back(ref_); }
+    void collectReferences(std::vector<CellRange>& out) const override { out.push_back(CellRange::single(ref_)); }
 
 private:
     CellRef ref_;
@@ -61,17 +67,17 @@ public:
     RangeFormula(CellRef from, CellRef to);
     Value evaluate(const CellResolver& cells) const override;
     void collectValues(const CellResolver& cells, std::vector<Value>& out) const override;
-    void collectReferences(std::vector<CellRef>& out) const override;
+    void collectReferences(std::vector<CellRange>& out) const override;
 
 private:
-    CellRef topLeft_, bottomRight_;
+    CellRange range_;
 };
 
 class NegateFormula : public Formula {
 public:
     explicit NegateFormula(FormulaPtr operand) : operand_(std::move(operand)) {}
     Value evaluate(const CellResolver& cells) const override;
-    void collectReferences(std::vector<CellRef>& out) const override { operand_->collectReferences(out); }
+    void collectReferences(std::vector<CellRange>& out) const override { operand_->collectReferences(out); }
 
 private:
     FormulaPtr operand_;
@@ -85,7 +91,7 @@ public:
     BinaryFormula(Op op, FormulaPtr left, FormulaPtr right)
         : op_(op), left_(std::move(left)), right_(std::move(right)) {}
     Value evaluate(const CellResolver& cells) const override;
-    void collectReferences(std::vector<CellRef>& out) const override;
+    void collectReferences(std::vector<CellRange>& out) const override;
 
 private:
     Op op_;
@@ -96,7 +102,7 @@ private:
 class AggregateFormula : public Formula {
 public:
     explicit AggregateFormula(std::vector<FormulaPtr> args) : args_(std::move(args)) {}
-    void collectReferences(std::vector<CellRef>& out) const override;
+    void collectReferences(std::vector<CellRange>& out) const override;
 
 protected:
     // Numbers from all arguments. Text and empty cells are skipped, as in Excel.
@@ -123,7 +129,7 @@ public:
     IfFormula(FormulaPtr condition, FormulaPtr whenTrue, FormulaPtr whenFalse)
         : condition_(std::move(condition)), whenTrue_(std::move(whenTrue)), whenFalse_(std::move(whenFalse)) {}
     Value evaluate(const CellResolver& cells) const override;
-    void collectReferences(std::vector<CellRef>& out) const override;
+    void collectReferences(std::vector<CellRange>& out) const override;
 
 private:
     FormulaPtr condition_, whenTrue_, whenFalse_;

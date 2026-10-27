@@ -63,6 +63,16 @@ Value compare(BinaryFormula::Op op, const Value& a, const Value& b) {
 
 }  // namespace
 
+std::vector<CellRef> CellResolver::cellsIn(const CellRange& range) const {
+    std::vector<CellRef> refs;
+    for (int row = range.topLeft.row; row <= range.bottomRight.row; ++row) {
+        for (int col = range.topLeft.col; col <= range.bottomRight.col; ++col) {
+            refs.push_back(CellRef{row, col});
+        }
+    }
+    return refs;
+}
+
 void Formula::collectValues(const CellResolver& cells, std::vector<Value>& out) const {
     out.push_back(evaluate(cells));
 }
@@ -80,28 +90,22 @@ Value ReferenceFormula::evaluate(const CellResolver& cells) const {
 }
 
 RangeFormula::RangeFormula(CellRef from, CellRef to)
-    : topLeft_{std::min(from.row, to.row), std::min(from.col, to.col)},
-      bottomRight_{std::max(from.row, to.row), std::max(from.col, to.col)} {}
+    : range_{{std::min(from.row, to.row), std::min(from.col, to.col)},
+             {std::max(from.row, to.row), std::max(from.col, to.col)}} {}
 
 Value RangeFormula::evaluate(const CellResolver&) const {
-    throw FormulaSyntaxException("A range like " + topLeft_.toString() + ":" + bottomRight_.toString() +
+    throw FormulaSyntaxException("A range like " + range_.topLeft.toString() + ":" + range_.bottomRight.toString() +
                                  " can only be used inside SUM or AVG");
 }
 
 void RangeFormula::collectValues(const CellResolver& cells, std::vector<Value>& out) const {
-    for (int row = topLeft_.row; row <= bottomRight_.row; ++row) {
-        for (int col = topLeft_.col; col <= bottomRight_.col; ++col) {
-            out.push_back(cells.valueAt(CellRef{row, col}));
-        }
+    for (const CellRef& ref : cells.cellsIn(range_)) {
+        out.push_back(cells.valueAt(ref));
     }
 }
 
-void RangeFormula::collectReferences(std::vector<CellRef>& out) const {
-    for (int row = topLeft_.row; row <= bottomRight_.row; ++row) {
-        for (int col = topLeft_.col; col <= bottomRight_.col; ++col) {
-            out.push_back(CellRef{row, col});
-        }
-    }
+void RangeFormula::collectReferences(std::vector<CellRange>& out) const {
+    out.push_back(range_);
 }
 
 Value NegateFormula::evaluate(const CellResolver& cells) const {
@@ -126,12 +130,12 @@ Value BinaryFormula::evaluate(const CellResolver& cells) const {
     }
 }
 
-void BinaryFormula::collectReferences(std::vector<CellRef>& out) const {
+void BinaryFormula::collectReferences(std::vector<CellRange>& out) const {
     left_->collectReferences(out);
     right_->collectReferences(out);
 }
 
-void AggregateFormula::collectReferences(std::vector<CellRef>& out) const {
+void AggregateFormula::collectReferences(std::vector<CellRange>& out) const {
     for (const FormulaPtr& arg : args_) {
         arg->collectReferences(out);
     }
@@ -176,7 +180,7 @@ Value IfFormula::evaluate(const CellResolver& cells) const {
     return condition ? whenTrue_->evaluate(cells) : whenFalse_->evaluate(cells);
 }
 
-void IfFormula::collectReferences(std::vector<CellRef>& out) const {
+void IfFormula::collectReferences(std::vector<CellRange>& out) const {
     condition_->collectReferences(out);
     whenTrue_->collectReferences(out);
     whenFalse_->collectReferences(out);
