@@ -1,7 +1,9 @@
 #include "core/StorageManager.h"
 
+#include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <system_error>
 #include <utility>
@@ -95,6 +97,15 @@ public:
         return result;
     }
 
+    // A number that must fit in an int, such as a commit id.
+    int smallNumber(const std::string& text) {
+        const long long result = number(text);
+        if (result > std::numeric_limits<int>::max()) {
+            fail("\"" + text + "\" is too large");
+        }
+        return static_cast<int>(result);
+    }
+
     [[noreturn]] void fail(const std::string& message) const {
         throw CorruptObjectException(name_ + " is damaged: " + message);
     }
@@ -127,8 +138,8 @@ std::string formatCommit(const Commit& commit) {
 
 Commit parseCommit(const std::string& text, const std::string& name) {
     CommitReader reader(text, name);
-    const int id = static_cast<int>(reader.number(reader.field("id")));
-    const int parentId = static_cast<int>(reader.number(reader.field("parent")));
+    const int id = reader.smallNumber(reader.field("id"));
+    const int parentId = reader.smallNumber(reader.field("parent"));
     std::string author = reader.field("author");
     const auto timestamp = static_cast<std::time_t>(reader.number(reader.field("time")));
     std::string message = reader.block(static_cast<std::size_t>(reader.number(reader.field("message"))));
@@ -145,6 +156,22 @@ Commit parseCommit(const std::string& text, const std::string& name) {
         files.emplace(path, Snapshot(path, reader.block(length)));
     }
     return Commit(id, parentId, std::move(author), std::move(message), timestamp, std::move(files));
+}
+
+// The id in a commit file name such as "12.txt", or 0 for any other file.
+int commitIdFromFileName(const fs::path& path) {
+    const std::string stem = path.stem().string();
+    if (path.extension() != ".txt" || stem.empty() || stem.size() > 9 || stem[0] == '0') {
+        return 0;
+    }
+    int id = 0;
+    for (char c : stem) {
+        if (!std::isdigit(static_cast<unsigned char>(c))) {
+            return 0;
+        }
+        id = id * 10 + (c - '0');
+    }
+    return id;
 }
 
 }  // namespace
@@ -181,20 +208,20 @@ void StorageManager::saveCommit(const Commit& commit) const {
 }
 
 History<Commit> StorageManager::loadCommits() const {
-    int count = 0;
+    // Only names like "12.txt" are commits, so a stray backup or copied-in file is ignored.
+    int highest = 0;
     std::error_code error;
     for (const fs::directory_entry& entry : fs::directory_iterator(folder_ / "commits", error)) {
-        if (entry.path().extension() == ".txt") {
-            ++count;
-        }
+        highest = std::max(highest, commitIdFromFileName(entry.path()));
     }
     if (error) {
         throw CorruptObjectException("Could not list " + (folder_ / "commits").string());
     }
 
     History<Commit> history;
-    for (int id = 1; id <= count; ++id) {
-        const std::string name = "commit " + std::to_string(id);
+    for (int id = 1; id <= highest; ++id) {
+        const std::string file = std::string(kFolderName) + "/commits/" + std::to_string(id) + ".txt";
+        const std::string name = "Commit " + std::to_string(id) + " (" + file + ")";
         const fs::path path = folder_ / "commits" / (std::to_string(id) + ".txt");
         if (!fs::is_regular_file(path)) {
             throw CorruptObjectException(name + " is missing");
@@ -226,8 +253,8 @@ int StorageManager::loadHead() const {
     while (!text.empty() && (text.back() == '\n' || text.back() == '\r')) {
         text.pop_back();
     }
-    CommitReader reader(text, "HEAD");
-    return static_cast<int>(reader.number(text));
+    CommitReader reader(text, std::string(kFolderName) + "/HEAD");
+    return reader.smallNumber(text);
 }
 
 std::set<std::string> StorageManager::loadTracked() const {

@@ -54,6 +54,7 @@ private:
 
     // The tracked files as they are on disk right now. Deleted files are left out.
     Commit::Files currentFiles() const;
+    bool differsFromHead(const Commit::Files& files) const;
     // Throws UncommittedChangesException.
     void requireNoUncommittedChanges() const;
     // Writes target's files and removes tracked files it doesn't have.

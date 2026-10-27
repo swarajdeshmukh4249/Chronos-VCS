@@ -133,3 +133,45 @@ TEST(storageRoundTripsHead) {
     overwrite(dir.path() / ".chrono" / "HEAD", "abc\n");
     CHECK_THROWS(storage.loadHead(), CorruptObjectException);
 }
+
+// Issue #48
+TEST(storageRejectsOversizedNumbers) {
+    TempDir dir;
+    StorageManager storage(dir.path());
+    storage.initialize();
+    storage.saveCommit(sampleCommit(1, "first"));
+    overwrite(dir.path() / ".chrono" / "commits" / "1.txt",
+              "id 99999999999\nparent 0\nauthor Swaraj\ntime 5\nmessage 2\nhi\n");
+    CHECK_THROWS(storage.loadCommits(), CorruptObjectException);
+    overwrite(dir.path() / ".chrono" / "HEAD", "99999999999\n");
+    CHECK_THROWS(storage.loadHead(), CorruptObjectException);
+}
+
+TEST(storageIgnoresStrayFilesInCommitsFolder) {
+    TempDir dir;
+    StorageManager storage(dir.path());
+    storage.initialize();
+    storage.saveCommit(sampleCommit(1, "first"));
+    storage.saveCommit(sampleCommit(2, "second"));
+    const fs::path commits = dir.path() / ".chrono" / "commits";
+    for (const char* stray : {"notes.txt", "2.txt~", "02.txt", "1.txt.bak", "readme.md"}) {
+        overwrite(commits / stray, "not a commit");
+    }
+    CHECK(storage.loadCommits().size() == 2);
+}
+
+TEST(storageErrorsNameTheDamagedFile) {
+    TempDir dir;
+    StorageManager storage(dir.path());
+    storage.initialize();
+    storage.saveCommit(sampleCommit(1, "first"));
+    storage.saveCommit(sampleCommit(2, "second"));
+    overwrite(dir.path() / ".chrono" / "commits" / "2.txt", "garbage");
+    std::string message;
+    try {
+        storage.loadCommits();
+    } catch (const CorruptObjectException& e) {
+        message = e.what();
+    }
+    CHECK(message.find(".chrono/commits/2.txt") != std::string::npos);
+}

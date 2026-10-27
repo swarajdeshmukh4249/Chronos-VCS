@@ -44,12 +44,13 @@ const Commit& Repository::commit(const std::string& message, const std::string& 
     if (tracked_.empty()) {
         throw NothingToCommitException("Nothing is tracked yet. Add a file first.");
     }
-    if (!hasUncommittedChanges()) {
+    Commit::Files files = currentFiles();
+    if (!differsFromHead(files)) {
         throw NothingToCommitException("Nothing changed since the last commit");
     }
 
     const int id = static_cast<int>(commits_.size()) + 1;
-    Commit commit(id, head_, author, message, std::time(nullptr), currentFiles());
+    Commit commit(id, head_, author, message, std::time(nullptr), std::move(files));
     // Save first, so a failed write never leaves memory ahead of disk.
     storage_.saveCommit(commit);
     storage_.saveHead(id);
@@ -66,7 +67,10 @@ const Commit& Repository::getCommit(int id) const {
 }
 
 bool Repository::hasUncommittedChanges() const {
-    const Commit::Files files = currentFiles();
+    return differsFromHead(currentFiles());
+}
+
+bool Repository::differsFromHead(const Commit::Files& files) const {
     return head_ == 0 ? !files.empty() : !getCommit(head_).hasSameFiles(files);
 }
 
