@@ -118,7 +118,7 @@ Value BinaryFormula::evaluate(const CellResolver& cells) const {
     case Op::Divide: {
         const double divisor = toNumber(b);
         if (divisor == 0.0) {
-            throw DivisionByZeroException("Division by zero");
+            throw DivisionByZeroException("Can't divide by zero");
         }
         return finite(toNumber(a) / divisor);
     }
@@ -162,7 +162,7 @@ Value SumFormula::evaluate(const CellResolver& cells) const {
 Value AvgFormula::evaluate(const CellResolver& cells) const {
     const std::vector<double> values = numbers(cells);
     if (values.empty()) {
-        throw DivisionByZeroException("AVG has no numbers to average");
+        throw DivisionByZeroException("AVG needs at least one number");
     }
     double total = 0.0;
     for (double number : values) {
