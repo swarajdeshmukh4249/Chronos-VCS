@@ -18,6 +18,12 @@ if(MINGW)
     add_link_options(-static)
 endif()
 
+# MSVC calls getenv and localtime "unsafe" because they aren't thread-safe. Chrono
+# is single-threaded and checks their results, so the standard functions are fine.
+if(MSVC)
+    add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
+endif()
+
 add_executable(chrono src/main.cpp ${CHRONO_SOURCES})
 target_include_directories(chrono PRIVATE include src)
 

@@ -1,9 +1,33 @@
 #include "sheet/SheetEvaluator.h"
 
-#include <set>
-
 #include "common/Exceptions.h"
 #include "sheet/FormulaParser.h"
+
+namespace {
+
+// The same error, with "C1: " in front of its message.
+std::exception_ptr inCell(const CellRef& cell, const std::exception_ptr& error) {
+    const std::string prefix = cell.toString() + ": ";
+    try {
+        std::rethrow_exception(error);
+    } catch (const DivisionByZeroException& e) {
+        return std::make_exception_ptr(DivisionByZeroException(prefix + e.what()));
+    } catch (const FormulaSyntaxException& e) {
+        return std::make_exception_ptr(FormulaSyntaxException(prefix + e.what()));
+    } catch (const InvalidCellReferenceException& e) {
+        return std::make_exception_ptr(InvalidCellReferenceException(prefix + e.what()));
+    } catch (const TypeMismatchException& e) {
+        return std::make_exception_ptr(TypeMismatchException(prefix + e.what()));
+    } catch (const NumberOverflowException& e) {
+        return std::make_exception_ptr(NumberOverflowException(prefix + e.what()));
+    } catch (const ChronoException& e) {
+        return std::make_exception_ptr(ChronoException(prefix + e.what()));
+    } catch (...) {
+        return error;
+    }
+}
+
+}  // namespace
 
 Value SheetEvaluator::valueAt(const CellRef& ref) const {
     const Cell& cell = grid_.get(ref);
@@ -15,84 +39,25 @@ Value SheetEvaluator::valueAt(const CellRef& ref) const {
     }
 
     if (!isDone(ref)) {
-        evaluateFormulaCell(ref);
+        const auto done = [this](const CellRef& other) { return isDone(other); };
+        for (const CellRef& next : graph_.evaluationOrder(ref, done)) {
+            evaluateFormulaCell(next);
+        }
     }
     auto error = errors_.find(ref);
     if (error != errors_.end()) {
+        readBrokenCell_ = true;
         std::rethrow_exception(error->second);
     }
     return values_.at(ref);
 }
 
-void SheetEvaluator::evaluateFormulaCell(const CellRef& root) const {
-    struct Frame {
-        CellRef ref;
-        bool expanded;
-    };
-    std::vector<Frame> stack{{root, false}};
-    // Expanded cells whose dependencies are still being evaluated: the current path.
-    std::set<CellRef> onPath;
-
-    while (!stack.empty()) {
-        const CellRef ref = stack.back().ref;
-        if (isDone(ref)) {
-            stack.pop_back();
-            continue;
-        }
-
-        if (!stack.back().expanded) {
-            stack.back().expanded = true;
-            onPath.insert(ref);
-            for (const CellRef& dependency : dependenciesOf(ref)) {
-                if (!grid_.get(dependency).isFormula() || isDone(dependency)) {
-                    continue;
-                }
-                if (onPath.count(dependency)) {
-                    // The expanded frames, bottom to top, are the path; the cycle starts at dependency.
-                    std::string cycle;
-                    for (const Frame& frame : stack) {
-                        if (frame.expanded && (!cycle.empty() || frame.ref == dependency)) {
-                            cycle += frame.ref.toString() + " -> ";
-                        }
-                    }
-                    throw CircularReferenceException("Circular reference: " + cycle + dependency.toString());
-                }
-                stack.push_back({dependency, false});
-            }
-            continue;
-        }
-
-        // Every dependency is now done, so evaluating ref only reads remembered values.
-        stack.pop_back();
-        onPath.erase(ref);
-        try {
-            values_[ref] = formulaAt(ref).evaluate(*this);
-        } catch (const CircularReferenceException&) {
-            throw;
-        } catch (...) {
-            errors_[ref] = std::current_exception();
-        }
-    }
-}
-
-bool SheetEvaluator::isDone(const CellRef& ref) const {
-    return values_.count(ref) || errors_.count(ref);
-}
-
-std::vector<CellRef> SheetEvaluator::dependenciesOf(const CellRef& ref) const {
-    std::vector<CellRef> references;
+void SheetEvaluator::evaluateFormulaCell(const CellRef& ref) const {
+    // Every cell this formula reads is already done, so evaluation only reads remembered values.
+    readBrokenCell_ = false;
     try {
-        formulaAt(ref).collectReferences(references);
-    } catch (const ChronoException&) {
-        // A formula that doesn't parse has no dependencies; evaluating it reports the error.
+        values_[ref] = FormulaParser::parse(grid_.get(ref).getText())->evaluate(*this);
+    } catch (...) {
+        errors_[ref] = readBrokenCell_ ? std::current_exception() : inCell(ref, std::current_exception());
     }
-    return references;
-}
-
-const Formula& SheetEvaluator::formulaAt(const CellRef& ref) const {
-    auto it = formulas_.find(ref);
-    if (it == formulas_.end()) {
-        it = formulas_.emplace(ref, FormulaParser::parse(grid_.get(ref).getText())).first;
-    }
-    return *it->second;
 }
