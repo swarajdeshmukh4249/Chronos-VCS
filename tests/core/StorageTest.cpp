@@ -218,6 +218,18 @@ TEST(storageKeepsEachContentOnce) {
     CHECK(storage.loadCommits().at(2).findFile("notes.txt")->getContent() == "same");
 }
 
+TEST(storageRepairsADamagedObjectOnSave) {
+    TempDir dir;
+    StorageManager storage(dir.path());
+    storage.initialize();
+    storage.saveCommit(sampleCommit(1, "same"));
+    const fs::path object = dir.path() / ".chrono" / "objects" / contentHash("same");
+    overwrite(object, "damaged");
+    storage.saveCommit(sampleCommit(2, "same"));
+    CHECK(readAll(object) == "same");
+    CHECK(storage.verify().problems.empty());
+}
+
 TEST(storageReportsMissingObjectsWhenLoading) {
     TempDir dir;
     StorageManager storage(dir.path());
