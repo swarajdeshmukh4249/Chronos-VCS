@@ -1,9 +1,23 @@
+#include <cstdio>
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <vector>
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <io.h>
+#include <windows.h>
+#ifndef ENABLE_VIRTUAL_TERMINAL_PROCESSING
+#define ENABLE_VIRTUAL_TERMINAL_PROCESSING 0x0004
+#endif
+#else
+#include <unistd.h>
+#endif
 
 #include "common/Exceptions.h"
 #include "core/Repository.h"
@@ -20,6 +34,7 @@ const char* const kUsage =
     "  commit -m <message>   save a new version of every tracked file\n"
     "  log                   list commits, newest first\n"
     "  show <id>             show one commit's details and files\n"
+    "  diff [<from> <to>]    show changed lines since the last commit, or between two commits\n"
     "  status                show whether there are uncommitted changes\n"
     "  verify                check that no saved history was changed or lost\n"
     "  checkout <id>         put the files from a commit back\n"
@@ -46,6 +61,51 @@ int parseId(const std::string& text) {
         throw CommitNotFoundException("\"" + text + "\" is not a commit number");
     }
     return id;
+}
+
+// Colour only when writing to a terminal, and never when NO_COLOR is set (https://no-color.org).
+bool useColour() {
+    if (std::getenv("NO_COLOR")) {
+        return false;
+    }
+#ifdef _WIN32
+    if (!_isatty(_fileno(stdout))) {
+        return false;
+    }
+    HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
+    DWORD mode = 0;
+    return GetConsoleMode(out, &mode) && SetConsoleMode(out, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+#else
+    return isatty(fileno(stdout)) != 0;
+#endif
+}
+
+// Prints each line of block with a prefix, e.g. "- old line" in red.
+void printLines(const std::string& block, const char* prefix, const char* colour, bool colours) {
+    std::istringstream lines(block);
+    for (std::string line; std::getline(lines, line);) {
+        std::cout << (colours ? colour : "") << prefix << line << (colours ? "\033[0m" : "") << "\n";
+    }
+}
+
+void printDiffs(const std::vector<FileDiff>& diffs) {
+    if (diffs.empty()) {
+        std::cout << "No differences\n";
+        return;
+    }
+    const bool colours = useColour();
+    for (const FileDiff& file : diffs) {
+        const char* status = file.status == FileDiff::Status::Added     ? " (new file)"
+                             : file.status == FileDiff::Status::Removed ? " (removed)"
+                                                                        : "";
+        std::cout << (colours ? "\033[1m" : "") << file.path << status << (colours ? "\033[0m" : "") << "\n";
+        for (const Change& change : file.result.changes) {
+            std::cout << (colours ? "\033[36m" : "") << "@ " << change.location << (colours ? "\033[0m" : "") << "\n";
+            printLines(change.before, "- ", "\033[31m", colours);
+            printLines(change.after, "+ ", "\033[32m", colours);
+        }
+        std::cout << "\n";
+    }
 }
 
 int run(const std::vector<std::string>& args) {
@@ -106,6 +166,10 @@ int run(const std::vector<std::string>& args) {
             const std::size_t bytes = snapshot.getContent().size();
             std::cout << "  " << path << "  (" << bytes << (bytes == 1 ? " byte)\n" : " bytes)\n");
         }
+    } else if (command == "diff" && args.size() == 1) {
+        printDiffs(repo.diffUncommitted());
+    } else if (command == "diff" && args.size() == 3) {
+        printDiffs(repo.diff(parseId(args[1]), parseId(args[2])));
     } else if (command == "status" && args.size() == 1) {
         const std::size_t count = repo.getTracked().size();
         std::cout << "On commit #" << repo.getHead() << ", tracking " << count << (count == 1 ? " file\n" : " files\n")
