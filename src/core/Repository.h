@@ -1,12 +1,14 @@
 #pragma once
 
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <set>
 #include <string>
 #include <vector>
 
 #include "common/DiffAlgorithm.h"
+#include "core/Branch.h"
 #include "core/Commit.h"
 #include "core/History.h"
 #include "core/StorageManager.h"
@@ -37,16 +39,33 @@ public:
     std::string track(const std::filesystem::path& path);
     const std::set<std::string>& getTracked() const { return tracked_; }
 
-    // Saves every tracked file as a new commit whose parent is the HEAD commit.
-    // Throws NothingToCommitException when nothing is tracked or nothing changed.
+    // Saves every tracked file as a new commit whose parent is the HEAD commit,
+    // and moves the current branch to it. Throws NothingToCommitException when
+    // nothing is tracked or nothing changed.
     const Commit& commit(const std::string& message, const std::string& author);
 
     // The commit the working files came from, or 0 before the first commit.
     int getHead() const { return head_; }
+    // The branch new commits go on, or "" after checking out a commit directly.
+    const std::string& getCurrentBranch() const { return branch_; }
 
+    // Every commit on every branch, oldest first.
     const History<Commit>& log() const { return commits_; }
+    // Ids of the commits that led to HEAD, following parents, newest first.
+    std::vector<int> historyOfHead() const;
     // Throws CommitNotFoundException.
     const Commit& getCommit(int id) const;
+
+    // Every branch, sorted by name.
+    std::vector<Branch> getBranches() const;
+    // Starts a branch at the HEAD commit without switching to it. Throws
+    // InvalidBranchNameException, or BranchExistsException if a branch with the
+    // same name ignoring case exists.
+    const Branch& createBranch(const std::string& name);
+    // Puts the branch's newest files on disk and makes it the current branch.
+    // Throws BranchNotFoundException, or UncommittedChangesException rather than
+    // overwrite unsaved work.
+    void switchBranch(const std::string& name);
 
     // What changed from commit fromId to commit toId, one entry per changed file.
     // Throws CommitNotFoundException.
@@ -57,8 +76,8 @@ public:
     // True when a tracked file differs from the HEAD commit.
     bool hasUncommittedChanges() const;
 
-    // Puts the files from commit id back on disk and makes it HEAD, without
-    // recording a commit. Throws CommitNotFoundException, or
+    // Puts the files from commit id back on disk and makes it HEAD, leaving the
+    // current branch. Throws CommitNotFoundException, or
     // UncommittedChangesException rather than overwrite unsaved work.
     void checkout(int id);
 
@@ -75,8 +94,10 @@ private:
     bool differsFromHead(const Commit::Files& files) const;
     // Throws UncommittedChangesException.
     void requireNoUncommittedChanges() const;
-    // Writes target's files and removes tracked files it doesn't have.
-    void restoreFiles(const Commit& target);
+    // Writes these files and removes tracked files that aren't among them.
+    void restoreFiles(const Commit::Files& files);
+    // Points HEAD, and the current branch if there is one, at commit id.
+    void moveHeadTo(int id);
 
     static std::vector<FileDiff> compare(const Commit::Files& before, const Commit::Files& after);
     // Strategy pattern: how to compare one file. Phase 3 adds a cell-by-cell diff for .csv files.
@@ -86,5 +107,7 @@ private:
     StorageManager storage_;
     History<Commit> commits_;
     std::set<std::string> tracked_;
-    int head_;
+    std::map<std::string, Branch> branches_;
+    std::string branch_;
+    int head_ = 0;
 };

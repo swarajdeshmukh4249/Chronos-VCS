@@ -8,12 +8,28 @@
 namespace fs = std::filesystem;
 
 Repository::Repository(const fs::path& root)
-    : tree_(root),
-      storage_(tree_.getRoot()),
-      commits_(storage_.loadCommits()),
-      tracked_(storage_.loadTracked()),
-      head_(storage_.loadHead()) {
-    if (head_ != 0 && !commits_.contains(static_cast<std::size_t>(head_))) {
+    : tree_(root), storage_(tree_.getRoot()), commits_(storage_.loadCommits()), tracked_(storage_.loadTracked()) {
+    auto exists = [this](int id) { return id == 0 || commits_.contains(static_cast<std::size_t>(id)); };
+    for (const Branch& branch : storage_.loadBranches()) {
+        if (!exists(branch.getCommitId())) {
+            throw CorruptObjectException("Branch \"" + branch.getName() + "\" points to commit #" +
+                                         std::to_string(branch.getCommitId()) + ", which doesn't exist");
+        }
+        branches_.emplace(branch.getName(), branch);
+    }
+
+    const HeadRef head = storage_.loadHead();
+    if (head.branch.empty()) {
+        head_ = head.commitId;
+    } else {
+        auto it = branches_.find(head.branch);
+        if (it == branches_.end()) {
+            throw CorruptObjectException("HEAD points to branch \"" + head.branch + "\", which doesn't exist");
+        }
+        branch_ = head.branch;
+        head_ = it->second.getCommitId();
+    }
+    if (!exists(head_)) {
         throw CorruptObjectException("HEAD points to commit #" + std::to_string(head_) + ", which doesn't exist");
     }
 }
@@ -54,10 +70,49 @@ const Commit& Repository::commit(const std::string& message, const std::string& 
     Commit commit(id, head_, author, message, std::time(nullptr), std::move(files));
     // Save first, so a failed write never leaves memory ahead of disk.
     storage_.saveCommit(commit);
-    storage_.saveHead(id);
     commits_.append(std::move(commit));
-    head_ = id;
+    moveHeadTo(id);
     return commits_.latest();
+}
+
+std::vector<int> Repository::historyOfHead() const {
+    std::vector<int> ids;
+    for (int id = head_; id != 0; id = getCommit(id).getParentId()) {
+        ids.push_back(id);
+    }
+    return ids;
+}
+
+std::vector<Branch> Repository::getBranches() const {
+    std::vector<Branch> branches;
+    for (const auto& entry : branches_) {
+        branches.push_back(entry.second);
+    }
+    return branches;
+}
+
+const Branch& Repository::createBranch(const std::string& name) {
+    Branch branch(name, head_);
+    for (const auto& entry : branches_) {
+        if (Branch::sameNameIgnoringCase(entry.first, name)) {
+            throw BranchExistsException("A branch named \"" + entry.first + "\" already exists");
+        }
+    }
+    storage_.saveBranch(branch);
+    return branches_.emplace(name, branch).first->second;
+}
+
+void Repository::switchBranch(const std::string& name) {
+    auto it = branches_.find(name);
+    if (it == branches_.end()) {
+        throw BranchNotFoundException("There is no branch named \"" + name + "\"");
+    }
+    requireNoUncommittedChanges();
+    const int id = it->second.getCommitId();
+    restoreFiles(id == 0 ? Commit::Files{} : getCommit(id).getFiles());
+    storage_.saveHead(HeadRef{name, 0});
+    branch_ = name;
+    head_ = id;
 }
 
 const Commit& Repository::getCommit(int id) const {
@@ -117,8 +172,9 @@ bool Repository::differsFromHead(const Commit::Files& files) const {
 void Repository::checkout(int id) {
     const Commit& target = getCommit(id);
     requireNoUncommittedChanges();
-    restoreFiles(target);
-    storage_.saveHead(id);
+    restoreFiles(target.getFiles());
+    storage_.saveHead(HeadRef{"", id});
+    branch_.clear();
     head_ = id;
 }
 
@@ -127,8 +183,19 @@ const Commit& Repository::revert(int id, const std::string& author) {
     requireNoUncommittedChanges();
     // Built before commit() runs, because appending a commit can move target.
     const std::string message = "Revert to #" + std::to_string(id) + ": " + target.getMessage();
-    restoreFiles(target);
+    restoreFiles(target.getFiles());
     return commit(message, author);
+}
+
+void Repository::moveHeadTo(int id) {
+    if (branch_.empty()) {
+        storage_.saveHead(HeadRef{"", id});
+    } else {
+        Branch& branch = branches_.at(branch_);
+        branch.moveTo(id);
+        storage_.saveBranch(branch);
+    }
+    head_ = id;
 }
 
 void Repository::requireNoUncommittedChanges() const {
@@ -137,13 +204,13 @@ void Repository::requireNoUncommittedChanges() const {
     }
 }
 
-void Repository::restoreFiles(const Commit& target) {
+void Repository::restoreFiles(const Commit::Files& files) {
     for (const std::string& path : tracked_) {
-        if (!target.findFile(path)) {
+        if (files.find(path) == files.end()) {
             tree_.remove(path);
         }
     }
-    for (const auto& [path, snapshot] : target.getFiles()) {
+    for (const auto& [path, snapshot] : files) {
         tree_.write(path, snapshot.getContent());
         tracked_.insert(path);
     }
