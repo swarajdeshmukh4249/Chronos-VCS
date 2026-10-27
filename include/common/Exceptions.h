@@ -11,6 +11,40 @@ public:
 
 // --- Core / NLP layer (Swaraj) ---
 
+// No .chrono/ folder in this directory or any parent.
+class RepositoryNotFoundException : public ChronoException {
+public:
+    using ChronoException::ChronoException;
+};
+
+class RepositoryExistsException : public ChronoException {
+public:
+    using ChronoException::ChronoException;
+};
+
+class CommitNotFoundException : public ChronoException {
+public:
+    using ChronoException::ChronoException;
+};
+
+// Nothing is tracked, or nothing changed since the last commit.
+class NothingToCommitException : public ChronoException {
+public:
+    using ChronoException::ChronoException;
+};
+
+// A file the user named does not exist in the working directory.
+class FileNotFoundException : public ChronoException {
+public:
+    using ChronoException::ChronoException;
+};
+
+// A file under .chrono/ is missing, unreadable or malformed.
+class CorruptObjectException : public ChronoException {
+public:
+    using ChronoException::ChronoException;
+};
+
 // --- Spreadsheet layer (Tanishka) ---
 
 class CircularReferenceException : public ChronoException {
