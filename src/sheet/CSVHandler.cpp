@@ -1,6 +1,7 @@
 #include "sheet/CSVHandler.h"
 
 #include <cctype>
+#include <utility>
 
 namespace {
 
@@ -52,15 +53,14 @@ std::string quoteIfNeeded(const std::string& field) {
 
 }  // namespace
 
-Grid<Cell> CSVHandler::parse(const std::string& csv) {
-    Grid<Cell> grid;
+CSVHandler::Rows CSVHandler::parseRows(const std::string& csv) {
+    Rows rows;
     std::size_t pos = csv.rfind("\xEF\xBB\xBF", 0) == 0 ? 3 : 0;
     if (pos == csv.size()) {
-        return grid;
+        return rows;
     }
 
-    int row = 0;
-    int col = 0;
+    rows.emplace_back();
     while (true) {
         std::string field;
         if (pos < csv.size() && csv[pos] == '"') {
@@ -81,16 +81,13 @@ Grid<Cell> CSVHandler::parse(const std::string& csv) {
         while (pos < csv.size() && !endsField(csv[pos])) {
             field += csv[pos++];
         }
-        if (!field.empty()) {
-            grid.set(CellRef{row, col}, Cell(field));
-        }
+        rows.back().push_back(std::move(field));
 
         if (pos == csv.size()) {
             break;
         }
         if (csv[pos] == ',') {
             ++pos;
-            ++col;
             continue;
         }
         if (csv[pos] == '\r' && pos + 1 < csv.size() && csv[pos + 1] == '\n') {
@@ -100,10 +97,36 @@ Grid<Cell> CSVHandler::parse(const std::string& csv) {
         if (pos == csv.size()) {
             break;  // the newline that ends the last row
         }
-        ++row;
-        col = 0;
+        rows.emplace_back();
+    }
+    return rows;
+}
+
+Grid<Cell> CSVHandler::parse(const std::string& csv) {
+    Grid<Cell> grid;
+    const Rows rows = parseRows(csv);
+    for (std::size_t row = 0; row < rows.size(); ++row) {
+        for (std::size_t col = 0; col < rows[row].size(); ++col) {
+            if (!rows[row][col].empty()) {
+                grid.set(CellRef{static_cast<int>(row), static_cast<int>(col)}, Cell(rows[row][col]));
+            }
+        }
     }
     return grid;
+}
+
+std::string CSVHandler::formatRows(const Rows& rows, const std::string& lineEnd) {
+    std::string out;
+    for (const Row& row : rows) {
+        for (std::size_t col = 0; col < row.size(); ++col) {
+            if (col > 0) {
+                out += ',';
+            }
+            out += quoteIfNeeded(row[col]);
+        }
+        out += lineEnd;
+    }
+    return out;
 }
 
 std::string CSVHandler::format(const Grid<Cell>& grid) {
