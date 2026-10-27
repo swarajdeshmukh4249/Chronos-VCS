@@ -33,6 +33,22 @@ public:
     using ChronoException::ChronoException;
 };
 
+class BranchNotFoundException : public ChronoException {
+public:
+    using ChronoException::ChronoException;
+};
+
+// A branch with that name, ignoring case, already exists.
+class BranchExistsException : public ChronoException {
+public:
+    using ChronoException::ChronoException;
+};
+
+class InvalidBranchNameException : public ChronoException {
+public:
+    using ChronoException::ChronoException;
+};
+
 // Checking out would overwrite edits that were never committed.
 class UncommittedChangesException : public ChronoException {
 public:

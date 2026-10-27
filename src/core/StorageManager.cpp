@@ -181,6 +181,13 @@ CommitRecord parseCommitRecord(const std::string& text, const std::string& name)
     return record;
 }
 
+std::string trimLineEnd(std::string text) {
+    while (!text.empty() && (text.back() == '\n' || text.back() == '\r')) {
+        text.pop_back();
+    }
+    return text;
+}
+
 std::string objectName(const std::string& hash) {
     return std::string(StorageManager::kFolderName) + "/objects/" + hash;
 }
@@ -228,7 +235,8 @@ void StorageManager::initialize() const {
     fs::create_directories(folder_ / "commits");
     fs::create_directories(folder_ / "objects");
     saveTracked({});
-    saveHead(0);
+    saveBranch(Branch("main", 0));
+    saveHead(HeadRef{"main", 0});
 }
 
 void StorageManager::saveCommit(const Commit& commit) const {
@@ -358,17 +366,51 @@ void StorageManager::saveTracked(const std::set<std::string>& paths) const {
     writeFile(folder_ / "tracked", content);
 }
 
-void StorageManager::saveHead(int id) const {
-    writeFile(folder_ / "HEAD", std::to_string(id) + "\n");
+void StorageManager::saveHead(const HeadRef& head) const {
+    writeFile(folder_ / "HEAD", head.branch.empty() ? std::to_string(head.commitId) + "\n" : "ref: " + head.branch + "\n");
 }
 
-int StorageManager::loadHead() const {
-    std::string text = readFile(folder_ / "HEAD");
-    while (!text.empty() && (text.back() == '\n' || text.back() == '\r')) {
-        text.pop_back();
+HeadRef StorageManager::loadHead() const {
+    const std::string name = std::string(kFolderName) + "/HEAD";
+    const std::string text = trimLineEnd(readFile(folder_ / "HEAD"));
+    CommitReader reader(text, name);
+    HeadRef head;
+    if (text.rfind("ref: ", 0) == 0) {
+        head.branch = text.substr(5);
+        if (!Branch::isValidName(head.branch)) {
+            reader.fail("\"" + head.branch + "\" is not a branch name");
+        }
+    } else {
+        head.commitId = reader.smallNumber(text);
     }
-    CommitReader reader(text, std::string(kFolderName) + "/HEAD");
-    return reader.smallNumber(text);
+    return head;
+}
+
+void StorageManager::saveBranch(const Branch& branch) const {
+    std::error_code ignored;
+    fs::create_directories(folder_ / "branches", ignored);
+    writeFile(folder_ / "branches" / branch.getName(), std::to_string(branch.getCommitId()) + "\n");
+}
+
+std::vector<Branch> StorageManager::loadBranches() const {
+    std::vector<Branch> branches;
+    std::error_code error;
+    for (const fs::directory_entry& entry : fs::directory_iterator(folder_ / "branches", error)) {
+        const std::string name = entry.path().filename().string();
+        // Skips files that can't be branches, such as .DS_Store or editor backups.
+        if (!entry.is_regular_file() || !Branch::isValidName(name)) {
+            continue;
+        }
+        const std::string text = trimLineEnd(readFile(entry.path()));
+        CommitReader reader(text, std::string(kFolderName) + "/branches/" + name);
+        branches.emplace_back(name, reader.smallNumber(text));
+    }
+    if (error) {
+        throw CorruptObjectException("Could not list " + (folder_ / "branches").string());
+    }
+    std::sort(branches.begin(), branches.end(),
+              [](const Branch& a, const Branch& b) { return a.getName() < b.getName(); });
+    return branches;
 }
 
 std::set<std::string> StorageManager::loadTracked() const {

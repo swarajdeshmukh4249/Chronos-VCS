@@ -235,3 +235,104 @@ TEST(diffUncommittedComparesWithHead) {
     CHECK(diffs.size() == 1);
     CHECK(diffs[0].result.changes[0].location == "line 2");
 }
+
+// Issue #8
+TEST(newRepositoryStartsOnMain) {
+    TempDir dir;
+    Repository repo = Repository::init(dir.path());
+    CHECK(repo.getCurrentBranch() == "main");
+    CHECK(repo.getBranches().size() == 1);
+    CHECK(repo.getBranches()[0].getCommitId() == 0);
+}
+
+TEST(twoBranchesHoldDifferentContent) {
+    TempDir dir;
+    Repository repo = Repository::init(dir.path());
+    writeFile(dir, "budget.txt", "Food 300\n");
+    repo.track("budget.txt");
+    repo.commit("first", "Swaraj");
+
+    repo.createBranch("feature");
+    CHECK(repo.getCurrentBranch() == "main");  // creating doesn't switch
+    repo.switchBranch("feature");
+    writeFile(dir, "budget.txt", "Food 350\n");
+    const int featureCommit = repo.commit("raise food", "Tanishka").getId();
+
+    repo.switchBranch("main");
+    CHECK(readFile(dir, "budget.txt") == "Food 300\n");
+    writeFile(dir, "budget.txt", "Food 300\nGym 40\n");
+    const int mainCommit = repo.commit("add gym", "Swaraj").getId();
+
+    repo.switchBranch("feature");
+    CHECK(readFile(dir, "budget.txt") == "Food 350\n");
+    CHECK(repo.getHead() == featureCommit);
+
+    // Both branches grew from commit 1.
+    CHECK(repo.getCommit(featureCommit).getParentId() == 1);
+    CHECK(repo.getCommit(mainCommit).getParentId() == 1);
+    CHECK(repo.historyOfHead() == (std::vector<int>{featureCommit, 1}));
+}
+
+TEST(branchesAreRememberedBetweenRuns) {
+    TempDir dir;
+    {
+        Repository repo = Repository::init(dir.path());
+        writeFile(dir, "notes.txt", "v1\n");
+        repo.track("notes.txt");
+        repo.commit("first", "Swaraj");
+        repo.createBranch("feature");
+        repo.switchBranch("feature");
+        writeFile(dir, "notes.txt", "v2\n");
+        repo.commit("second", "Swaraj");
+    }
+    const Repository reopened = Repository::open(dir.path());
+    CHECK(reopened.getCurrentBranch() == "feature");
+    CHECK(reopened.getHead() == 2);
+    CHECK(reopened.getBranches().size() == 2);
+    CHECK(reopened.getBranches()[1].getName() == "main");
+    CHECK(reopened.getBranches()[1].getCommitId() == 1);
+}
+
+TEST(branchRulesAreEnforced) {
+    TempDir dir;
+    Repository repo = Repository::init(dir.path());
+    writeFile(dir, "notes.txt", "v1\n");
+    repo.track("notes.txt");
+    repo.commit("first", "Swaraj");
+
+    CHECK_THROWS(repo.createBranch("main"), BranchExistsException);
+    CHECK_THROWS(repo.createBranch("Main"), BranchExistsException);
+    CHECK_THROWS(repo.createBranch("bad name"), InvalidBranchNameException);
+    CHECK_THROWS(repo.switchBranch("nope"), BranchNotFoundException);
+
+    // Names ignore case everywhere, so "Main" finds main and HEAD keeps the stored spelling.
+    repo.switchBranch("Main");
+    CHECK(repo.getCurrentBranch() == "main");
+    CHECK(Repository::open(dir.path()).getCurrentBranch() == "main");
+
+    repo.createBranch("feature");
+    writeFile(dir, "notes.txt", "unsaved\n");
+    CHECK_THROWS(repo.switchBranch("feature"), UncommittedChangesException);
+    CHECK(readFile(dir, "notes.txt") == "unsaved\n");
+}
+
+TEST(checkoutLeavesTheBranch) {
+    TempDir dir;
+    Repository repo = Repository::init(dir.path());
+    writeFile(dir, "notes.txt", "v1\n");
+    repo.track("notes.txt");
+    repo.commit("first", "Swaraj");
+    writeFile(dir, "notes.txt", "v2\n");
+    repo.commit("second", "Swaraj");
+
+    repo.checkout(1);
+    CHECK(repo.getCurrentBranch().empty());
+    writeFile(dir, "notes.txt", "experiment\n");
+    repo.commit("experiment", "Swaraj");
+    // main didn't move, because HEAD wasn't on it.
+    CHECK(repo.getBranches()[0].getCommitId() == 2);
+
+    repo.switchBranch("main");
+    CHECK(readFile(dir, "notes.txt") == "v2\n");
+    CHECK(repo.getCurrentBranch() == "main");
+}

@@ -133,11 +133,39 @@ TEST(storageRoundTripsHead) {
     TempDir dir;
     StorageManager storage(dir.path());
     storage.initialize();
-    CHECK(storage.loadHead() == 0);
-    storage.saveHead(12);
-    CHECK(storage.loadHead() == 12);
+    CHECK(storage.loadHead().branch == "main");
+
+    storage.saveHead(HeadRef{"", 12});
+    CHECK(storage.loadHead().branch.empty());
+    CHECK(storage.loadHead().commitId == 12);
+
+    storage.saveHead(HeadRef{"feature", 0});
+    CHECK(storage.loadHead().branch == "feature");
+
     overwrite(dir.path() / ".chrono" / "HEAD", "abc\n");
     CHECK_THROWS(storage.loadHead(), CorruptObjectException);
+    overwrite(dir.path() / ".chrono" / "HEAD", "ref: ../../escape\n");
+    CHECK_THROWS(storage.loadHead(), CorruptObjectException);
+}
+
+// Issue #8
+TEST(storageRoundTripsBranches) {
+    TempDir dir;
+    StorageManager storage(dir.path());
+    storage.initialize();
+    storage.saveBranch(Branch("feature", 3));
+    storage.saveBranch(Branch("main", 2));
+    overwrite(dir.path() / ".chrono" / "branches" / ".DS_Store", "junk");
+
+    const std::vector<Branch> branches = storage.loadBranches();
+    CHECK(branches.size() == 2);
+    CHECK(branches[0].getName() == "feature");
+    CHECK(branches[0].getCommitId() == 3);
+    CHECK(branches[1].getName() == "main");
+    CHECK(branches[1].getCommitId() == 2);
+
+    overwrite(dir.path() / ".chrono" / "branches" / "main", "two\n");
+    CHECK_THROWS(storage.loadBranches(), CorruptObjectException);
 }
 
 // Issue #48

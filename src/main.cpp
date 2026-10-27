@@ -35,7 +35,10 @@ const char* const kUsage =
     "  init                  start tracking history in this folder\n"
     "  add <file>...         include files in future commits\n"
     "  commit -m <message>   save a new version of every tracked file\n"
-    "  log                   list commits, newest first\n"
+    "  log [--all]           list this branch's commits, newest first (--all: every commit)\n"
+    "  branch                list branches\n"
+    "  branch <name>         start a new branch at the current commit\n"
+    "  switch <name>         work on another branch\n"
     "  show <id>             show one commit's details and files\n"
     "  diff [<from> <to>]    show changed lines since the last commit, or between two commits\n"
     "  status                show whether there are uncommitted changes\n"
@@ -149,14 +152,42 @@ int run(const std::vector<std::string>& args) {
         const Commit& commit = repo.commit(args[2], author());
         const std::size_t count = commit.getFiles().size();
         std::cout << "Saved commit #" << commit.getId() << " (" << count << (count == 1 ? " file)\n" : " files)\n");
-    } else if (command == "log" && args.size() == 1) {
-        if (repo.log().empty()) {
+    } else if (command == "log" && (args.size() == 1 || (args.size() == 2 && args[1] == "--all"))) {
+        std::vector<int> ids = repo.historyOfHead();
+        if (args.size() == 2) {
+            ids.clear();
+            for (std::size_t id = repo.log().size(); id >= 1; --id) {
+                ids.push_back(static_cast<int>(id));
+            }
+        }
+        if (ids.empty()) {
             std::cout << "No commits yet\n";
         }
-        for (std::size_t id = repo.log().size(); id >= 1; --id) {
-            const Commit& commit = repo.log().at(id);
-            std::cout << (commit.getId() == repo.getHead() ? "* " : "  ") << commit.summary() << "\n";
+        const std::vector<Branch> branches = repo.getBranches();
+        for (int id : ids) {
+            std::string labels;
+            for (const Branch& branch : branches) {
+                if (branch.getCommitId() == id) {
+                    labels += (labels.empty() ? "" : ", ") + branch.getName();
+                }
+            }
+            std::cout << (id == repo.getHead() ? "* " : "  ") << repo.getCommit(id).summary()
+                      << (labels.empty() ? "" : "  (" + labels + ")") << "\n";
         }
+    } else if (command == "branch" && args.size() == 1) {
+        for (const Branch& branch : repo.getBranches()) {
+            const bool current = branch.getName() == repo.getCurrentBranch();
+            std::cout << (current ? "* " : "  ") << branch.getName() << "  "
+                      << (branch.getCommitId() == 0 ? "(no commits yet)" : "#" + std::to_string(branch.getCommitId()))
+                      << "\n";
+        }
+    } else if (command == "branch" && args.size() == 2) {
+        const Branch& branch = repo.createBranch(args[1]);
+        std::cout << "Created branch " << branch.getName() << " at commit #" << branch.getCommitId()
+                  << ". Use \"chrono switch " << branch.getName() << "\" to work on it.\n";
+    } else if (command == "switch" && args.size() == 2) {
+        repo.switchBranch(args[1]);
+        std::cout << "Switched to branch " << repo.getCurrentBranch() << "\n";
     } else if (command == "show" && args.size() == 2) {
         const Commit& commit = repo.getCommit(parseId(args[1]));
         std::cout << "Commit #" << commit.getId() << (commit.getId() == repo.getHead() ? " (current)" : "") << "\n"
@@ -175,7 +206,12 @@ int run(const std::vector<std::string>& args) {
         printDiffs(repo.diff(parseId(args[1]), parseId(args[2])));
     } else if (command == "status" && args.size() == 1) {
         const std::size_t count = repo.getTracked().size();
-        std::cout << "On commit #" << repo.getHead() << ", tracking " << count << (count == 1 ? " file\n" : " files\n")
+        if (repo.getCurrentBranch().empty()) {
+            std::cout << "Not on a branch (at commit #" << repo.getHead() << "). New commits won't move any branch.\n";
+        } else {
+            std::cout << "On branch " << repo.getCurrentBranch() << " (commit #" << repo.getHead() << ")\n";
+        }
+        std::cout << "Tracking " << count << (count == 1 ? " file\n" : " files\n")
                   << (repo.hasUncommittedChanges() ? "You have uncommitted changes\n" : "Nothing to commit\n");
     } else if (command == "checkout" && args.size() == 2) {
         const int id = parseId(args[1]);

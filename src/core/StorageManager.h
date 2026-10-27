@@ -5,8 +5,16 @@
 #include <string>
 #include <vector>
 
+#include "core/Branch.h"
 #include "core/Commit.h"
 #include "core/History.h"
+
+// What HEAD points at: normally a branch, or a commit directly after checking
+// out an old commit ("not on a branch").
+struct HeadRef {
+    std::string branch;  // empty when HEAD points straight at a commit
+    int commitId = 0;    // used only when branch is empty
+};
 
 // One thing `verify` found wrong, e.g. {".chrono/objects/af63...", "was changed (notes.txt in commit #2)"}.
 struct IntegrityProblem {
@@ -22,7 +30,8 @@ struct IntegrityReport {
 
 // Everything under .chrono/ is read and written here, so Repository never
 // deals with file formats. Files are plain text so they can be opened and read:
-//   .chrono/HEAD             id of the commit the working files came from (0 = none yet)
+//   .chrono/HEAD             "ref: main" on a branch, or a commit id when not on one
+//   .chrono/branches/<name>  id of the branch's newest commit (0 = none yet)
 //   .chrono/tracked          one tracked path per line
 //   .chrono/commits/<id>.txt one commit (see StorageManager.cpp for the format)
 //   .chrono/objects/<hash>   one version of a file, named by its content hash
@@ -52,9 +61,13 @@ public:
     void saveTracked(const std::set<std::string>& paths) const;
     std::set<std::string> loadTracked() const;
 
-    void saveHead(int id) const;
-    // Throws CorruptObjectException if HEAD is missing or not a number.
-    int loadHead() const;
+    void saveHead(const HeadRef& head) const;
+    // Throws CorruptObjectException if HEAD is missing or malformed.
+    HeadRef loadHead() const;
+
+    void saveBranch(const Branch& branch) const;
+    // Sorted by name. Throws CorruptObjectException if a branch file is malformed.
+    std::vector<Branch> loadBranches() const;
 
 private:
     int highestCommitId() const;
