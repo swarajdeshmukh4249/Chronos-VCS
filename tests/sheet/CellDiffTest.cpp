@@ -84,6 +84,29 @@ TEST(cellDiffComparesFormulasAsWritten) {
     CHECK(hasChange(result, "B1", "=A1*2", "=A1*3"));
 }
 
+// #57 review: the new row must not be paired with the edited row below it.
+TEST(cellDiffPairsAnEditedRowWithItselfAfterAnInsertAboveIt) {
+    const DiffResult result = diffSheets("Item,Cost\nRent,1000\nFood,300\nGym,0\n",
+                                         "Item,Cost\nTravel,150\nRent,1100\nFood,300\nGym,0\n");
+    CHECK(result.changes.size() == 2);
+    CHECK(hasChange(result, "row 2", "", "Travel,150"));
+    CHECK(hasChange(result, "B3", "1000", "1100"));
+}
+
+TEST(cellDiffDoesNotPairUnrelatedRows) {
+    const DiffResult result = diffSheets("Item,Cost\nRent,1000\n", "Item,Cost\nTravel,150\n");
+    CHECK(result.changes.size() == 2);
+    CHECK(hasChange(result, "row 2", "Rent,1000", ""));
+    CHECK(hasChange(result, "row 2", "", "Travel,150"));
+}
+
+TEST(cellDiffPairsEditedRowsByNameNotPosition) {
+    const DiffResult result = diffSheets("Item,Cost\nRent,1000\nFood,300\n", "Item,Cost\nFood,350\nGym,40\n");
+    CHECK(hasChange(result, "B2", "300", "350"));
+    CHECK(hasChange(result, "row 2", "Rent,1000", ""));
+    CHECK(hasChange(result, "row 3", "", "Gym,40"));
+}
+
 TEST(cellDiffHandlesNewAndDeletedFiles) {
     CHECK(diffSheets("", "a,b\n").changes.size() == 1);
     CHECK(hasChange(diffSheets("a,b\n", ""), "row 1", "a,b", ""));

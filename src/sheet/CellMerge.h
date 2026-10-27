@@ -13,7 +13,9 @@
 //       <<<<<<< ours: 1300 ======= theirs: 1250 >>>>>>>
 //     so the rest of the file stays a CSV that Excel opens.
 // Rows added on both sides at the same place are all kept (ours first), since
-// two people adding entries is the normal case for a sheet. A row deleted on one
+// two people adding entries is the normal case for a sheet; but two added rows
+// with the same first field ("Travel") and different values are reported as a
+// conflict, because that is often one item added twice. A row deleted on one
 // side and edited on the other is a conflict that keeps the edited row.
 //
 // Untouched cells keep their exact text, and the result uses ours' line endings

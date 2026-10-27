@@ -17,17 +17,76 @@ std::size_t usedLength(const CSVHandler::Row& row) {
     return length;
 }
 
-// Ends a run of changed rows: edited rows first, then the extra removals or additions.
-void flushRun(std::vector<RowMatch>& matches, std::vector<std::size_t>& removed, std::vector<std::size_t>& added) {
-    const std::size_t paired = std::min(removed.size(), added.size());
-    for (std::size_t k = 0; k < paired; ++k) {
-        matches.push_back({removed[k], added[k]});
+// Above this many pairs in one run of changed rows, rows are paired in order instead.
+const std::size_t kMaxRunPairs = 1'000'000;
+
+// Matching first fields outweigh any number of other matching fields.
+const std::uint64_t kSameKey = std::uint64_t{1} << 32;
+
+// How alike an old and a new row are, for deciding whether the new row is an edit of
+// the old one. The first field is usually the row's name ("Rent"), so a matching
+// non-empty first field counts most; otherwise at least half the fields must match.
+// 0 means "not the same row".
+std::uint64_t likeness(const CSVHandler::Row& a, const CSVHandler::Row& b) {
+    const std::size_t width = std::max(a.size(), b.size());
+    std::uint64_t same = 0;
+    for (std::size_t col = 0; col < width; ++col) {
+        if (!fieldAt(a, col).empty() && fieldAt(a, col) == fieldAt(b, col)) {
+            ++same;
+        }
     }
-    for (std::size_t k = paired; k < removed.size(); ++k) {
-        matches.push_back({removed[k], RowMatch::kNone});
+    if (!fieldAt(a, 0).empty() && fieldAt(a, 0) == fieldAt(b, 0)) {
+        return kSameKey + same;
     }
-    for (std::size_t k = paired; k < added.size(); ++k) {
-        matches.push_back({RowMatch::kNone, added[k]});
+    return same > 0 && 2 * same >= width ? same : 0;
+}
+
+// Ends a run of changed rows. Each removed row is paired with the added row most like
+// it, keeping order, so inserting "Travel" above an edited "Rent" pairs Rent with Rent.
+// Rows with no likely partner become plain removals or additions.
+void flushRun(std::vector<RowMatch>& matches, std::vector<std::size_t>& removed, std::vector<std::size_t>& added,
+              const CSVHandler::Rows& oldRows, const CSVHandler::Rows& newRows) {
+    const std::size_t r = removed.size();
+    const std::size_t a = added.size();
+    if (r * a > kMaxRunPairs) {
+        const std::size_t paired = std::min(r, a);
+        for (std::size_t k = 0; k < paired; ++k) {
+            matches.push_back({removed[k], added[k]});
+        }
+        for (std::size_t k = paired; k < r; ++k) {
+            matches.push_back({removed[k], RowMatch::kNone});
+        }
+        for (std::size_t k = paired; k < a; ++k) {
+            matches.push_back({RowMatch::kNone, added[k]});
+        }
+    } else {
+        // best[i][j] = highest total likeness pairing removed[i..] with added[j..] in order.
+        std::vector<std::uint64_t> score(r * a);
+        for (std::size_t i = 0; i < r; ++i) {
+            for (std::size_t j = 0; j < a; ++j) {
+                score[i * a + j] = likeness(oldRows[removed[i]], newRows[added[j]]);
+            }
+        }
+        std::vector<std::uint64_t> best((r + 1) * (a + 1), 0);
+        auto at = [&](std::size_t i, std::size_t j) -> std::uint64_t& { return best[i * (a + 1) + j]; };
+        for (std::size_t i = r; i-- > 0;) {
+            for (std::size_t j = a; j-- > 0;) {
+                const std::uint64_t s = score[i * a + j];
+                at(i, j) = std::max({at(i + 1, j), at(i, j + 1), s > 0 ? s + at(i + 1, j + 1) : 0});
+            }
+        }
+
+        std::size_t i = 0;
+        std::size_t j = 0;
+        while (i < r || j < a) {
+            if (i < r && j < a && score[i * a + j] > 0 && at(i, j) == score[i * a + j] + at(i + 1, j + 1)) {
+                matches.push_back({removed[i++], added[j++]});
+            } else if (i < r && (j == a || at(i, j) == at(i + 1, j))) {
+                matches.push_back({removed[i++], RowMatch::kNone});
+            } else {
+                matches.push_back({RowMatch::kNone, added[j++]});
+            }
+        }
     }
     removed.clear();
     added.clear();
@@ -97,7 +156,7 @@ std::vector<RowMatch> alignRows(const CSVHandler::Rows& oldRows, const CSVHandle
         std::size_t j = 0;
         while (i < n || j < m) {
             if (i < n && j < m && sameRow(oldRows[prefix + i], newRows[prefix + j])) {
-                flushRun(matches, removed, added);
+                flushRun(matches, removed, added, oldRows, newRows);
                 matches.push_back({prefix + i++, prefix + j++});
             } else if (j == m || (i < n && at(i + 1, j) >= at(i, j + 1))) {
                 removed.push_back(prefix + i++);
@@ -106,7 +165,7 @@ std::vector<RowMatch> alignRows(const CSVHandler::Rows& oldRows, const CSVHandle
             }
         }
     }
-    flushRun(matches, removed, added);
+    flushRun(matches, removed, added, oldRows, newRows);
 
     for (std::size_t i = oldEnd, j = newEnd; i < oldRows.size(); ++i, ++j) {
         matches.push_back({i, j});

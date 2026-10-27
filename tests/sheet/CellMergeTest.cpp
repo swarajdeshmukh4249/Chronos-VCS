@@ -100,6 +100,36 @@ TEST(cellMergeReturnsTheChangedSideWhenOnlyOneChanged) {
     CHECK(mergeSheets(kBase, kBase, ours).mergedContent == ours);
 }
 
+// #57 review: inserting a row above an edited row must not move the conflict.
+TEST(cellMergeFindsTheConflictOnTheEditedRowAfterAnInsertAboveIt) {
+    const std::string base = "Item,Cost\nRent,1000\nFood,300\nGym,0\n";
+    const MergeResult result = mergeSheets(base, "Item,Cost\nTravel,150\nRent,1100\nFood,300\nGym,0\n",
+                                           "Item,Cost\nRent,1200\nFood,300\nGym,0\n");
+    CHECK(result.conflicts.size() == 1);
+    CHECK(result.conflicts[0].location == "B3");
+    CHECK(result.conflicts[0].ours == "1100");
+    CHECK(result.conflicts[0].theirs == "1200");
+    CHECK(result.mergedContent ==
+          "Item,Cost\nTravel,150\nRent,<<<<<<< ours: 1100 ======= theirs: 1200 >>>>>>>\nFood,300\nGym,0\n");
+}
+
+TEST(cellMergeCombinesAnInsertAboveWithAnEditToTheSameRow) {
+    const std::string base = "Item,Cost,Paid\nRent,1000,no\n";
+    const MergeResult result =
+        mergeSheets(base, "Item,Cost,Paid\nTravel,150,no\nRent,1100,no\n", "Item,Cost,Paid\nRent,1000,yes\n");
+    CHECK(result.conflicts.empty());
+    CHECK(result.mergedContent == "Item,Cost,Paid\nTravel,150,no\nRent,1100,yes\n");
+}
+
+TEST(cellMergeFlagsRowsBothSidesAddedForTheSameItem) {
+    const MergeResult result = mergeSheets(kBase, kBase + "Travel,150,150\n", kBase + "Travel,200,200\n");
+    CHECK(result.conflicts.size() == 1);
+    CHECK(result.conflicts[0].location == "row 5");
+    CHECK(result.conflicts[0].ours == "Travel,150,150");
+    CHECK(result.conflicts[0].theirs == "Travel,200,200");
+    CHECK(result.mergedContent == kBase + "Travel,150,150\nTravel,200,200\n");
+}
+
 TEST(cellMergeShowsEmptyValuesInConflictCells) {
     const MergeResult result = mergeSheets("a,b\n", "a,\n", "a,c\n");
     CHECK(result.conflicts.size() == 1);

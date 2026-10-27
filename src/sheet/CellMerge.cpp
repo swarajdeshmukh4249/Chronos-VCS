@@ -78,9 +78,26 @@ private:
             // Both sides adding the same row (say, the same new expense) keeps one copy.
             const bool duplicate = std::any_of(ourRows.begin(), ourRows.end(),
                                                [&](std::size_t ourRow) { return sameRow(ours_[ourRow], theirs_[row]); });
-            if (!duplicate) {
-                merged_.push_back(theirs_[row]);
+            if (duplicate) {
+                continue;
             }
+            // The same name with different values is often one item added twice, so
+            // both rows stay but someone should look before committing.
+            const std::string& key = fieldAt(theirs_[row], 0);
+            auto sameKey = std::find_if(ourRows.begin(), ourRows.end(), [&](std::size_t ourRow) {
+                return !key.empty() && fieldAt(ours_[ourRow], 0) == key;
+            });
+            if (sameKey != ourRows.end()) {
+                Conflict conflict;
+                conflict.location = "row " + std::to_string(merged_.size() + 1);
+                conflict.ours = rowText(ours_[*sameKey]);
+                conflict.theirs = rowText(theirs_[row]);
+                conflict.explanation = "Both branches added a \"" + key + "\" row with different values (" +
+                                       conflict.ours + " and " + conflict.theirs +
+                                       "). Both were kept; delete the one you don't want, then commit.";
+                result_.conflicts.push_back(conflict);
+            }
+            merged_.push_back(theirs_[row]);
         }
     }
 
