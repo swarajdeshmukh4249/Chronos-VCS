@@ -82,7 +82,7 @@ std::string describe(std::size_t firstOld, std::size_t removed) {
 
 }  // namespace
 
-DiffResult LCSDiff::diff(const Snapshot& a, const Snapshot& b) {
+DiffResult LCSDiff::diff(const Snapshot& a, const Snapshot& b) const {
     const std::vector<std::string> oldLines = splitLines(a.getContent());
     const std::vector<std::string> newLines = splitLines(b.getContent());
 

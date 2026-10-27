@@ -9,6 +9,6 @@ class MergeStrategy {
 public:
     virtual MergeResult merge(const Snapshot& base,
                               const Snapshot& ours,
-                              const Snapshot& theirs) = 0;
+                              const Snapshot& theirs) const = 0;
     virtual ~MergeStrategy() = default;
 };

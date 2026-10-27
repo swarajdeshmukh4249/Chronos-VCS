@@ -11,5 +11,5 @@
 // in the old version: "line 3", "lines 3-5", or "after line 2" for an insertion.
 class LCSDiff : public DiffAlgorithm {
 public:
-    DiffResult diff(const Snapshot& a, const Snapshot& b) override;
+    DiffResult diff(const Snapshot& a, const Snapshot& b) const override;
 };

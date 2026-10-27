@@ -7,8 +7,8 @@
 namespace {
 
 DiffResult diffOf(const std::string& before, const std::string& after) {
-    LCSDiff algorithm;
-    DiffAlgorithm& diff = algorithm;  // used through the interface, as Repository does
+    const LCSDiff algorithm;
+    const DiffAlgorithm& diff = algorithm;  // used through the interface, as Repository does
     return diff.diff(Snapshot("f.txt", before), Snapshot("f.txt", after));
 }
 
