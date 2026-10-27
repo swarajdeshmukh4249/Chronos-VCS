@@ -39,11 +39,18 @@ file(GLOB CORE_TESTS CONFIGURE_DEPENDS tests/core/*.cpp)
 add_executable(core_tests tests/common/TestMain.cpp ${CORE_TESTS} ${CORE_SOURCES})
 target_include_directories(core_tests PRIVATE include src tests/common)
 
+# Plain-English layer tests.
+file(GLOB NLP_SOURCES CONFIGURE_DEPENDS src/nlp/*.cpp)
+file(GLOB NLP_TESTS CONFIGURE_DEPENDS tests/nlp/*.cpp)
+add_executable(nlp_tests tests/common/TestMain.cpp ${NLP_TESTS} ${NLP_SOURCES})
+target_include_directories(nlp_tests PRIVATE include src tests/common)
+
 enable_testing()
 add_test(NAME sheet_tests COMMAND sheet_tests)
 add_test(NAME core_tests COMMAND core_tests)
+add_test(NAME nlp_tests COMMAND nlp_tests)
 
-foreach(target chrono sheet_tests core_tests)
+foreach(target chrono sheet_tests core_tests nlp_tests)
     if(MSVC)
         target_compile_options(${target} PRIVATE /W4)
     else()
