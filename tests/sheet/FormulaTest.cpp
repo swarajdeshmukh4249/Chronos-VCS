@@ -79,7 +79,9 @@ TEST(badReferenceInFormulaThrows) {
 TEST(textInArithmeticThrows) {
     Grid<Cell> grid;
     grid.set("A1", "hello");
-    CHECK_THROWS(eval(grid, "=A1+1"), ChronoException);
+    CHECK_THROWS(eval(grid, "=A1+1"), TypeMismatchException);
+    CHECK_THROWS(eval(grid, "=-A1"), TypeMismatchException);
+    CHECK_THROWS(eval(grid, "=IF(A1, 1, 2)"), TypeMismatchException);
 }
 
 // Issue #27
@@ -145,7 +147,7 @@ TEST(textLiteralsAndComparisons) {
     CHECK(isText(eval(grid, "=\"say \"\"hi\"\"\""), "say \"hi\""));
     CHECK(isNumber(eval(grid, "=IF(A1=\"yes\", 1, 2)"), 1));
     CHECK(isNumber(eval(grid, "=A1=5"), 0));
-    CHECK_THROWS(eval(grid, "=A1>5"), ChronoException);
+    CHECK_THROWS(eval(grid, "=A1>5"), TypeMismatchException);
 }
 
 // The example from the work split: each branch sees a different C1.

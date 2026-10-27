@@ -11,7 +11,7 @@ double toNumber(const Value& value) {
         return *number;
     }
     if (const std::string* text = std::get_if<std::string>(&value)) {
-        throw ChronoException("Expected a number but got text \"" + *text + "\"");
+        throw TypeMismatchException("Expected a number but got text \"" + *text + "\"");
     }
     return 0.0;
 }
@@ -26,7 +26,7 @@ Value compare(BinaryFormula::Op op, const Value& a, const Value& b) {
         if (std::holds_alternative<double>(a) || std::holds_alternative<double>(b)) {
             if (op == Op::Equal) return 0.0;
             if (op == Op::NotEqual) return 1.0;
-            throw ChronoException("Cannot compare text with a number");
+            throw TypeMismatchException("Cannot compare text with a number");
         }
         // An empty cell compares like "".
         const std::string none;

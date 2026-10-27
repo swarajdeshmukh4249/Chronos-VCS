@@ -15,8 +15,19 @@ file(GLOB_RECURSE CHRONO_SOURCES CONFIGURE_DEPENDS
 add_executable(chrono src/main.cpp ${CHRONO_SOURCES})
 target_include_directories(chrono PRIVATE include src)
 
-if(MSVC)
-    target_compile_options(chrono PRIVATE /W4)
-else()
-    target_compile_options(chrono PRIVATE -Wall -Wextra -Wpedantic)
-endif()
+# Spreadsheet layer tests. Run with: ctest --test-dir build
+file(GLOB SHEET_SOURCES CONFIGURE_DEPENDS src/sheet/*.cpp)
+file(GLOB SHEET_TESTS CONFIGURE_DEPENDS tests/sheet/*.cpp)
+add_executable(sheet_tests ${SHEET_TESTS} ${SHEET_SOURCES})
+target_include_directories(sheet_tests PRIVATE include src)
+
+enable_testing()
+add_test(NAME sheet_tests COMMAND sheet_tests)
+
+foreach(target chrono sheet_tests)
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W4)
+    else()
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+endforeach()

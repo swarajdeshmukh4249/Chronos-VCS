@@ -37,3 +37,9 @@ class FormulaSyntaxException : public ChronoException {
 public:
     using ChronoException::ChronoException;
 };
+
+// A formula used text where a number was needed, e.g. ="abc"+1.
+class TypeMismatchException : public ChronoException {
+public:
+    using ChronoException::ChronoException;
+};
