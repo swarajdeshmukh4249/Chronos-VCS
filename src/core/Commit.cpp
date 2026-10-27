@@ -3,13 +3,14 @@
 #include <utility>
 
 Commit::Commit(int id, int parentId, std::string author, std::string message, std::time_t timestamp,
-               Files files)
+               Files files, int mergedParentId)
     : id_(id),
       parentId_(parentId),
       author_(std::move(author)),
       message_(std::move(message)),
       timestamp_(timestamp),
-      files_(std::move(files)) {}
+      files_(std::move(files)),
+      mergedParentId_(mergedParentId) {}
 
 const Snapshot* Commit::findFile(const std::string& path) const {
     auto it = files_.find(path);

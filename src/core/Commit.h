@@ -13,13 +13,16 @@ public:
     // Keyed by path, so files are always listed in the same order.
     using Files = std::map<std::string, Snapshot>;
 
-    // parentId is 0 for the first commit.
+    // parentId is 0 for the first commit. A merge commit also records the commit
+    // it merged in as mergedParentId; other commits leave it 0.
     Commit(int id, int parentId, std::string author, std::string message, std::time_t timestamp,
-           Files files);
+           Files files, int mergedParentId = 0);
 
     int getId() const { return id_; }
     int getParentId() const { return parentId_; }
     bool hasParent() const { return parentId_ != 0; }
+    int getMergedParentId() const { return mergedParentId_; }
+    bool isMerge() const { return mergedParentId_ != 0; }
     const std::string& getAuthor() const { return author_; }
     const std::string& getMessage() const { return message_; }
     std::time_t getTimestamp() const { return timestamp_; }
@@ -44,4 +47,5 @@ private:
     std::string message_;
     std::time_t timestamp_;
     Files files_;
+    int mergedParentId_;
 };
