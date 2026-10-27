@@ -148,6 +148,8 @@ private:
     // The tracked files as they are on disk right now. Deleted files are left out.
     Commit::Files currentFiles() const;
     bool differsFromHead(const Commit::Files& files) const;
+    // Throws MergeConflictException while a merge waits, so it can't follow you to another commit.
+    void requireNoPendingMerge() const;
     // Throws UncommittedChangesException.
     void requireNoUncommittedChanges() const;
     // Finds a branch ignoring case, like createBranch does. Throws BranchNotFoundException.

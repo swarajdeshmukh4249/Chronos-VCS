@@ -463,6 +463,48 @@ TEST(mergeStopsAtConflictsUntilTheyAreFixed) {
     CHECK(!repo.isMerging());
 }
 
+// #55 review: a waiting merge must not follow you to another branch or commit.
+TEST(aWaitingMergeBlocksSwitchCheckoutAndRevert) {
+    TempDir dir;
+    Repository repo = budgetRepo(dir);
+    writeFile(dir, "budget.txt", "Rent 1000\nFood 350\nGym 0\n");
+    repo.commit("food 350", "Swaraj");  // #2
+    repo.switchBranch("feature");
+    writeFile(dir, "budget.txt", "Rent 1000\nFood 250\nGym 0\n");
+    repo.commit("food 250", "Tanishka");  // #3
+    repo.switchBranch("main");
+    CHECK(repo.merge("feature", "Swaraj").kind == MergeOutcome::Kind::Conflicts);
+
+    // Keeping ours makes the files match HEAD, so only the merge check can stop these.
+    writeFile(dir, "budget.txt", "Rent 1000\nFood 350\nGym 0\n");
+    CHECK_THROWS(repo.switchBranch("feature"), MergeConflictException);
+    CHECK_THROWS(repo.checkout(1), MergeConflictException);
+    CHECK_THROWS(repo.revert(1, "Swaraj"), MergeConflictException);
+    CHECK(repo.getCurrentBranch() == "main");
+    CHECK(repo.getHead() == 2);
+    CHECK(repo.isMerging());
+}
+
+TEST(commitRefusesAnyLeftoverConflictMarker) {
+    TempDir dir;
+    Repository repo = budgetRepo(dir);
+    writeFile(dir, "budget.txt", "Rent 1000\nFood 350\nGym 0\n");
+    repo.commit("food 350", "Swaraj");
+    repo.switchBranch("feature");
+    writeFile(dir, "budget.txt", "Rent 1000\nFood 250\nGym 0\n");
+    repo.commit("food 250", "Tanishka");
+    repo.switchBranch("main");
+    CHECK(repo.merge("feature", "Swaraj").kind == MergeOutcome::Kind::Conflicts);
+
+    // The opening marker was deleted, but the other two are still there.
+    writeFile(dir, "budget.txt", "Rent 1000\nFood 350\n=======\nFood 250\n>>>>>>> theirs\nGym 0\n");
+    CHECK_THROWS(repo.commit("half fixed", "Swaraj"), MergeConflictException);
+    writeFile(dir, "budget.txt", "Rent 1000\nFood 350\nFood 250\n>>>>>>> theirs\nGym 0\n");
+    CHECK_THROWS(repo.commit("half fixed", "Swaraj"), MergeConflictException);
+    writeFile(dir, "budget.txt", "Rent 1000\nFood 300\nGym 0\n");
+    CHECK(repo.commit("fixed", "Swaraj").isMerge());
+}
+
 TEST(abortMergePutsFilesBack) {
     TempDir dir;
     Repository repo = budgetRepo(dir);
