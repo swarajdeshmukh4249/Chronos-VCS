@@ -36,6 +36,8 @@ const char* const kUsage =
     "  branch                list branches\n"
     "  branch <name>         start a new branch at the current commit\n"
     "  switch <name>         work on another branch\n"
+    "  merge <branch>        bring another branch's changes into this one\n"
+    "  merge --abort         cancel a merge that stopped at conflicts\n"
     "  show <id>             show one commit's details and files\n"
     "  diff [<from> <to>]    show changed lines since the last commit, or between two commits\n"
     "  status                show whether there are uncommitted changes\n"
@@ -168,7 +170,9 @@ int run(const std::vector<std::string>& args) {
                     labels += (labels.empty() ? "" : ", ") + branch.getName();
                 }
             }
-            std::cout << (id == repo.getHead() ? "* " : "  ") << repo.getCommit(id).summary()
+            const Commit& commit = repo.getCommit(id);
+            std::cout << (id == repo.getHead() ? "* " : "  ") << commit.summary()
+                      << (commit.isMerge() ? "  [merged #" + std::to_string(commit.getMergedParentId()) + "]" : "")
                       << (labels.empty() ? "" : "  (" + labels + ")") << "\n";
         }
     } else if (command == "branch" && args.size() == 1) {
@@ -185,10 +189,40 @@ int run(const std::vector<std::string>& args) {
     } else if (command == "switch" && args.size() == 2) {
         repo.switchBranch(args[1]);
         std::cout << "Switched to branch " << args[1] << "\n";
+    } else if (command == "merge" && args.size() == 2 && args[1] == "--abort") {
+        repo.abortMerge();
+        std::cout << "Merge cancelled. Your files are back as they were.\n";
+    } else if (command == "merge" && args.size() == 2) {
+        const MergeOutcome outcome = repo.merge(args[1], author());
+        switch (outcome.kind) {
+        case MergeOutcome::Kind::AlreadyUpToDate:
+            std::cout << "Already up to date: everything on " << args[1] << " is already here.\n";
+            break;
+        case MergeOutcome::Kind::FastForward:
+            std::cout << "Fast-forwarded to commit #" << outcome.commitId << ". This branch was simply behind "
+                      << args[1] << ", so no merge commit was needed.\n";
+            break;
+        case MergeOutcome::Kind::Merged:
+            std::cout << "Merged " << args[1] << " and saved merge commit #" << outcome.commitId << ".\n";
+            break;
+        case MergeOutcome::Kind::Conflicts:
+            std::cout << "Merge stopped: " << outcome.conflicts.size()
+                      << (outcome.conflicts.size() == 1 ? " conflict" : " conflicts") << " to fix.\n";
+            for (const MergeOutcome::FileConflict& file : outcome.conflicts) {
+                std::cout << "  " << file.path << ", " << file.conflict.location << ": "
+                          << file.conflict.explanation << "\n";
+            }
+            std::cout << "\nIn each file, between <<<<<<< and >>>>>>>, \"ours\" is this branch and \"theirs\" is "
+                      << args[1] << ".\nKeep the lines you want, delete the markers, then run "
+                      << "chrono commit -m \"<message>\".\nTo cancel instead, run chrono merge --abort.\n";
+            return 1;
+        }
     } else if (command == "show" && args.size() == 2) {
         const Commit& commit = repo.getCommit(parseId(args[1]));
         std::cout << "Commit #" << commit.getId() << (commit.getId() == repo.getHead() ? " (current)" : "") << "\n"
-                  << "Parent:  " << (commit.hasParent() ? "#" + std::to_string(commit.getParentId()) : "none") << "\n"
+                  << "Parent:  " << (commit.hasParent() ? "#" + std::to_string(commit.getParentId()) : "none")
+                  << (commit.isMerge() ? " and #" + std::to_string(commit.getMergedParentId()) + " (merge)" : "")
+                  << "\n"
                   << "Author:  " << commit.getAuthor() << "\n"
                   << "Date:    " << commit.formattedTime() << "\n"
                   << "Message: " << commit.getMessage() << "\n\n"
@@ -207,6 +241,10 @@ int run(const std::vector<std::string>& args) {
             std::cout << "Not on a branch (at commit #" << repo.getHead() << "). New commits won't move any branch.\n";
         } else {
             std::cout << "On branch " << repo.getCurrentBranch() << " (commit #" << repo.getHead() << ")\n";
+        }
+        if (repo.isMerging()) {
+            std::cout << "Merging " << repo.getPendingMerge().branch
+                      << ": fix the conflicts and commit, or run chrono merge --abort\n";
         }
         std::cout << "Tracking " << count << (count == 1 ? " file\n" : " files\n")
                   << (repo.hasUncommittedChanges() ? "You have uncommitted changes\n" : "Nothing to commit\n");
