@@ -102,16 +102,22 @@ const Branch& Repository::createBranch(const std::string& name) {
     return branches_.emplace(name, branch).first->second;
 }
 
-void Repository::switchBranch(const std::string& name) {
-    auto it = branches_.find(name);
-    if (it == branches_.end()) {
-        throw BranchNotFoundException("There is no branch named \"" + name + "\"");
+const Branch& Repository::findBranch(const std::string& name) const {
+    for (const auto& entry : branches_) {
+        if (Branch::sameNameIgnoringCase(entry.first, name)) {
+            return entry.second;
+        }
     }
+    throw BranchNotFoundException("There is no branch named \"" + name + "\"");
+}
+
+void Repository::switchBranch(const std::string& name) {
+    const Branch& branch = findBranch(name);
     requireNoUncommittedChanges();
-    const int id = it->second.getCommitId();
+    const int id = branch.getCommitId();
     restoreFiles(id == 0 ? Commit::Files{} : getCommit(id).getFiles());
-    storage_.saveHead(HeadRef{name, 0});
-    branch_ = name;
+    storage_.saveHead(HeadRef{branch.getName(), 0});
+    branch_ = branch.getName();
     head_ = id;
 }
 

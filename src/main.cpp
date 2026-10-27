@@ -184,7 +184,7 @@ int run(const std::vector<std::string>& args) {
                   << ". Use \"chrono switch " << branch.getName() << "\" to work on it.\n";
     } else if (command == "switch" && args.size() == 2) {
         repo.switchBranch(args[1]);
-        std::cout << "Switched to branch " << args[1] << "\n";
+        std::cout << "Switched to branch " << repo.getCurrentBranch() << "\n";
     } else if (command == "show" && args.size() == 2) {
         const Commit& commit = repo.getCommit(parseId(args[1]));
         std::cout << "Commit #" << commit.getId() << (commit.getId() == repo.getHead() ? " (current)" : "") << "\n"
