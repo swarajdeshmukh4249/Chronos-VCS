@@ -86,6 +86,8 @@ ConflictMessage ConflictMessages::explain(const std::string& path, const Conflic
     // row (deleted on one side, or added on both) has none, so there is nothing to delete.
     if (!Repository::isSheet(path)) {
         message.advice = "Keep the lines you want, then delete the <<<<<<<, ======= and >>>>>>> lines.";
+    } else if (conflict.semantic) {
+        message.advice = "There are no markers: check the merged value, change the cell if it is wrong, then commit.";
     } else if (looksLikeCellRef(conflict.location)) {
         message.advice = "Both values are in the cell now, between <<<<<<< and >>>>>>>. Replace the whole cell "
                          "with the one you want.";

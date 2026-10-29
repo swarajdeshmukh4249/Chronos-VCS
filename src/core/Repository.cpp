@@ -10,6 +10,7 @@
 #include "core/LineMerge.h"
 #include "sheet/CellDiff.h"
 #include "sheet/CellMerge.h"
+#include "sheet/DependencyAwareMerge.h"
 
 namespace fs = std::filesystem;
 
@@ -381,7 +382,7 @@ bool Repository::isSheet(const std::string& path) {
 
 std::unique_ptr<MergeStrategy> Repository::mergeStrategyFor(const std::string& path) {
     if (isSheet(path)) {
-        return std::make_unique<CellMerge>();
+        return std::make_unique<DependencyAwareMerge>();
     }
     return std::make_unique<LineMerge>();
 }
