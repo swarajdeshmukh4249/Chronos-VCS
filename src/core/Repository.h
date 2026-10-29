@@ -172,7 +172,7 @@ private:
     static std::vector<FileDiff> compare(const Commit::Files& before, const Commit::Files& after);
     // Strategy pattern: how to compare one file. Sheets get CellDiff, everything else LCSDiff.
     static std::unique_ptr<DiffAlgorithm> diffAlgorithmFor(const std::string& path);
-    // Strategy pattern: how to merge one file. Sheets get CellMerge, everything else LineMerge.
+    // Strategy pattern: how to merge one file. Sheets get DependencyAwareMerge (CellMerge plus formula checks), everything else LineMerge.
     static std::unique_ptr<MergeStrategy> mergeStrategyFor(const std::string& path);
 
     WorkingTree tree_;

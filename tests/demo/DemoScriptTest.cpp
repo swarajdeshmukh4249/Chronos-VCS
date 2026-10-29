@@ -268,8 +268,14 @@ TEST(step5_differentCellsOfOneRowMergeAndTheFormulaSeesTheNewValue) {
     // is no clash at all.
     project.repo.switchBranch("main");
     const MergeOutcome outcome = project.repo.merge("experiment", kAuthor);
-    CHECK(outcome.kind == MergeOutcome::Kind::Merged);
-    CHECK(outcome.conflicts.empty());
+    // No cell was edited twice, but C1 now shows a value neither side saw (#34).
+    CHECK(outcome.kind == MergeOutcome::Kind::Conflicts);
+    CHECK(outcome.conflicts.size() == 1);
+    CHECK(outcome.conflicts[0].conflict.location == "C1");
+    CHECK(outcome.conflicts[0].conflict.semantic);
+    CHECK(outcome.conflicts[0].conflict.explanation.find("reads B1") != std::string::npos);
+    CHECK(outcome.conflicts[0].conflict.ours == "100");
+    CHECK(outcome.conflicts[0].conflict.theirs == "20");
 
     const std::string merged = project.tree.read("budget.csv");
     const CSVHandler::Rows rows = CSVHandler::parseRows(merged);
@@ -282,6 +288,9 @@ TEST(step5_differentCellsOfOneRowMergeAndTheFormulaSeesTheNewValue) {
     // 100, experiment saw 20, and the merge produces something else again. That
     // this is worth warning about is #34.
     CHECK(valueOf(merged, "C1") == "OVER BUDGET");
+
+    // There are no markers to remove: once someone has looked, it commits.
+    CHECK(project.repo.commit("checked the merged budget", kAuthor).isMerge());
 }
 
 // Demo step 6: the same work, asked for in plain English.
