@@ -257,6 +257,17 @@ void Repository::abortMerge() {
     storage_.savePendingMerge(pending_);
 }
 
+int Repository::latestCommitBefore(std::time_t when) const {
+    int best = 0;
+    for (int id : historyOfHead()) {
+        const Commit& commit = getCommit(id);
+        if (commit.getTimestamp() < when && (best == 0 || commit.getTimestamp() > getCommit(best).getTimestamp())) {
+            best = id;
+        }
+    }
+    return best;
+}
+
 std::vector<int> Repository::historyOfHead() const {
     if (head_ == 0) {
         return {};

@@ -10,9 +10,10 @@ Chrono saves snapshots of your files, lets you browse and restore earlier versio
 |---|---|---|
 | 0 | Project setup, shared interfaces | Done |
 | 1 | Commits, history, storage, checkout and revert; cells, grid and formula engine | Done |
-| 2 | Branches, hashing, integrity check, line diff; dependency graph, CSV | In progress |
-| 3 | Three-way merge, undo; cell-level diff and merge | Planned |
-| 4 | Plain-English commands; semantic conflict detection | Planned |
+| 2 | Branches, hashing, integrity check, line diff; dependency graph, CSV | Done |
+| 3 | Three-way merge, undo; cell-level diff and merge | Done |
+| 4 | Plain-English commands; semantic conflict detection | Done |
+| Extras | `chrono view` web page, `log --graph`, `checkout --before`, `--explain` | Done |
 
 Work is tracked in [GitHub issues](https://github.com/swarajdeshmukh4249/Chronos-VCS/issues) and [milestones](https://github.com/swarajdeshmukh4249/Chronos-VCS/milestones).
 
@@ -26,13 +27,15 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-This builds three programs in `build/`:
+This builds five programs in `build/`:
 
 | Program | What it is |
 |---|---|
 | `chrono` | The command-line tool |
 | `core_tests` | Tests for the version control core |
 | `sheet_tests` | Tests for the spreadsheet engine |
+| `nlp_tests` | Tests for the plain-English layer |
+| `demo_tests` | The whole demo script, step by step |
 
 Every pull request is built and tested automatically on Linux, macOS and Windows.
 
@@ -46,7 +49,28 @@ chrono log                     # list commits, newest first (* marks the current
 chrono status                  # check for uncommitted changes
 chrono checkout 1              # put the files from commit 1 back
 chrono revert 1                # put commit 1's files back and record it as a new commit
+chrono checkout --before 2026-10-20  # the files as they were when that day began
+chrono log --graph             # every commit, with branches and merges drawn beside it
+chrono diff 1 3                # what changed (cell by cell for .csv files)
+chrono branch experiment       # start a branch; chrono switch experiment to work on it
+chrono merge experiment        # bring it in; flags formulas whose merged value nobody saw
+chrono undo                    # take back the last command that changed something
+chrono verify                  # check no saved history was changed or lost
+chrono say "go back to how things were yesterday evening"   # plain English
+chrono view                    # open the repository as a web page in your browser
+chrono merge experiment --explain   # any command: say what it does inside, then do it
 ```
+
+### The headline feature
+
+```
+Base:        B1 = 10    C1 = =B1*2                     (C1 shows 20)
+main:        B1 = 50                                   (C1 shows 100)
+experiment:             C1 = =IF(B1>20,"OVER BUDGET",B1*2)   (C1 shows 20)
+```
+
+Git merges this cleanly. Chrono merges the cells too, then warns that C1 now shows
+OVER BUDGET, a value neither branch ever saw. `chrono view` shows it as a "paradox".
 
 The author name comes from the `CHRONO_AUTHOR` environment variable, then `USER` or `USERNAME`.
 
@@ -77,7 +101,7 @@ History is stored as plain text under `.chrono/`, so you can open it and see exa
 include/common/   interfaces and exceptions shared by both layers
 src/core/         version control: commits, history, storage, repository
 src/sheet/        spreadsheet engine: cells, grid, formulas, evaluation, dependency graph, CSV
-src/nlp/          plain-English commands (Phase 4)
+src/nlp/          plain-English commands
 src/main.cpp      command-line entry point
 tests/            test suites for each layer, sharing tests/common/
 ```

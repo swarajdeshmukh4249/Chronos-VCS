@@ -29,6 +29,7 @@
 #include "common/Exceptions.h"
 #include "core/Command.h"
 #include "core/HtmlView.h"
+#include "core/LogGraph.h"
 #include "core/Repository.h"
 #include "nlp/RequestPlanner.h"
 #include "nlp/RuleBasedParser.h"
@@ -49,7 +50,8 @@ const char* const kUsage =
     "  init                  start tracking history in this folder\n"
     "  add <file>...         include files in future commits\n"
     "  commit -m <message>   save a new version of every tracked file\n"
-    "  log [--all]           list this branch's commits, newest first (--all: every commit)\n"
+    "  log [--all|--graph]   list this branch's commits, newest first (--all: every commit,\n"
+    "                        --graph: every commit with branches and merges drawn beside it)\n"
     "  branch                list branches\n"
     "  branch <name>         start a new branch at the current commit\n"
     "  switch <name>         work on another branch\n"
@@ -60,9 +62,11 @@ const char* const kUsage =
     "  status                show whether there are uncommitted changes\n"
     "  verify                check that no saved history was changed or lost\n"
     "  checkout <id>         put the files from a commit back\n"
+    "  checkout --before <YYYY-MM-DD>  put back the files as they were when that day began\n"
     "  revert <id>           put a commit's files back and record it as a new commit\n"
     "  undo                  take back the last command that changed something\n"
     "  view [--no-open]      draw the history, branches and sheets as a web page and open it\n"
+    "  <command> --explain   say step by step what the command does inside, then do it\n"
     "  say <request>         do what a plain-English request asks, e.g.\n"
     "                        chrono say \"go back to how things were yesterday evening\"\n"
     "                        add -y to skip the question before anything is overwritten\n";
@@ -207,10 +211,90 @@ int say(const Repository& repo, const std::vector<std::string>& words, bool assu
     return run(plan.args);
 }
 
-int run(const std::vector<std::string>& args) {
+// What a command does inside, step by step, for --explain (#22).
+std::vector<std::string> stepsOf(const std::vector<std::string>& args) {
+    const std::string& command = args[0];
+    const bool merge = command == "merge" && !(args.size() > 1 && args[1] == "--abort");
+    if (command == "init") {
+        return {"Create .chrono/ with commits/, objects/ and an empty HEAD",
+                "Start the main branch, with no commits yet"};
+    }
+    if (command == "add") {
+        return {"Check the file exists inside the repository", "Remember its path in .chrono/tracked"};
+    }
+    if (command == "commit") {
+        return {"Read every tracked file into a Snapshot",
+                "Hash each one with FNV-1a; a version already in .chrono/objects/ is stored only once",
+                "Refuse if nothing changed since HEAD, or if a merge still has conflict markers",
+                "Write the commit file (parent, author, time, message, file hashes) with its own checksum",
+                "Move the current branch and HEAD to the new commit",
+                "Remember the state before, so chrono undo can take it back"};
+    }
+    if (command == "diff") {
+        return {"Load the two versions of each file",
+                "Strategy pattern: a .csv file gets CellDiff (cell by cell), anything else LCSDiff (lines)",
+                "LCSDiff finds the longest common subsequence of lines; what is left over is the change"};
+    }
+    if (merge) {
+        return {"Find the merge base: the newest commit both branches grew from",
+                "Fast-forward if this branch has nothing the other lacks",
+                "Otherwise merge each file three ways (base, this branch, the other branch)",
+                ".csv files: DependencyAwareMerge lines rows up by content, merges cell by cell, then builds the "
+                "formula dependency graph and flags any formula whose merged value neither branch saw",
+                "Other files: LineMerge, with <<<<<<< ======= >>>>>>> markers where both changed the same lines",
+                "No conflicts: save a merge commit with two parents. Conflicts: write the files and wait for commit"};
+    }
+    if (command == "checkout" || command == "revert") {
+        return {"Find the commit (by id, or the newest one before --before's date)",
+                "Refuse rather than overwrite uncommitted work",
+                "Write that commit's files back from .chrono/objects/",
+                command == "revert" ? "Save the result as a new commit, so no history is lost"
+                                    : "Move HEAD there, leaving the branch where it was"};
+    }
+    if (command == "undo") {
+        return {"Look up the state saved before the last command that changed something",
+                "Put the files, HEAD and branches back; commits stay saved (see log --all)"};
+    }
+    if (command == "verify") {
+        return {"Re-hash every object in .chrono/objects/ and compare it with its name",
+                "Check every commit file's checksum and that each file it lists exists",
+                "Name each damaged file and the commit that uses it"};
+    }
+    if (command == "say") {
+        return {"Tokenizer splits the request into words; quoted text is kept whole",
+                "Every IntentMatcher scores it; the best wins, and a tie asks \"Did you mean...?\"",
+                "DetailExtractor picks out branches, files, commit numbers and times (\"yesterday evening\")",
+                "RequestPlanner turns that into ordinary chrono arguments, asking first if work could be lost"};
+    }
+    if (command == "view") {
+        return {"Walk every commit, branch and tracked sheet",
+                "Re-run MergeImpactReport on each merge to find paradoxes",
+                "Write one self-contained page to .chrono/view.html and open it"};
+    }
+    return {"Read the repository from .chrono/ and print what was asked for"};
+}
+
+int run(const std::vector<std::string>& given) {
+    std::vector<std::string> args;
+    bool explain = false;
+    for (const std::string& word : given) {
+        if (word == "--explain") {
+            explain = true;
+        } else {
+            args.push_back(word);
+        }
+    }
     if (args.empty()) {
         std::cout << kUsage;
         return 1;
+    }
+    if (explain) {
+        std::cout << "How chrono " << args[0] << " works:\n";
+        int step = 0;
+        for (const std::string& line : stepsOf(args)) {
+            std::cout << "  " << ++step << ". " << line << "\n";
+        }
+        std::cout << "\n";
     }
     const std::string& command = args[0];
 
@@ -258,6 +342,26 @@ int run(const std::vector<std::string>& args) {
     }
 
     // Commands that change the repository are Command objects, so undo can take them back.
+    // checkout --before 2026-10-20: the version in place when that day began.
+    if (command == "checkout" && args.size() == 3 && args[1] == "--before") {
+        std::tm day{};
+        char end = 0;
+        if (std::sscanf(args[2].c_str(), "%d-%d-%d%c", &day.tm_year, &day.tm_mon, &day.tm_mday, &end) != 3) {
+            std::cerr << "error: Give the date as YYYY-MM-DD, e.g. chrono checkout --before 2026-10-20\n";
+            return 1;
+        }
+        day.tm_year -= 1900;
+        day.tm_mon -= 1;
+        day.tm_isdst = -1;
+        const int id = repo.latestCommitBefore(std::mktime(&day));
+        if (id == 0) {
+            std::cerr << "error: Nothing had been saved before " << args[2] << "\n";
+            return 1;
+        }
+        std::cout << "The newest commit before " << args[2] << " is #" << id << "\n";
+        return run({"checkout", std::to_string(id)});
+    }
+
     if (std::unique_ptr<Command> change = CommandFactory::create(args, author())) {
         return change->run(repo, std::cout);
     }
@@ -281,7 +385,14 @@ int run(const std::vector<std::string>& args) {
         return 0;
     }
 
-    if (command == "log" && (args.size() == 1 || (args.size() == 2 && args[1] == "--all"))) {
+    if (command == "log" && args.size() == 2 && args[1] == "--graph") {
+        for (const std::string& line : LogGraph::draw(repo)) {
+            std::cout << line << "\n";
+        }
+        if (repo.log().size() == 0) {
+            std::cout << "No commits yet\n";
+        }
+    } else if (command == "log" && (args.size() == 1 || (args.size() == 2 && args[1] == "--all"))) {
         std::vector<int> ids = repo.historyOfHead();
         if (args.size() == 2) {
             ids.clear();
