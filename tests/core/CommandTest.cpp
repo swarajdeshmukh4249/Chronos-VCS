@@ -110,6 +110,12 @@ TEST(mergeCommandExplainsConflictsInsideSheetCells) {
     repo.switchBranch("main");
 
     const std::string output = run(repo, {"merge", "feature"}, 1);
-    CHECK(output.find("budget.csv, B2: ") != std::string::npos);
-    CHECK(output.find("In a .csv file both values sit inside the cell") != std::string::npos);
+    // A cell reference is named as one (#19), and both branches are named, so
+    // "this branch" in the merge's own explanation can be followed.
+    CHECK(output.find("budget.csv, cell B2") != std::string::npos);
+    CHECK(output.find("\"this branch\" is main and \"the other branch\" is feature") != std::string::npos);
+    CHECK(output.find("on main: 350") != std::string::npos);
+    CHECK(output.find("on feature: 250") != std::string::npos);
+    CHECK(output.find("before: 300") != std::string::npos);
+    CHECK(output.find("Replace the whole cell") != std::string::npos);
 }
