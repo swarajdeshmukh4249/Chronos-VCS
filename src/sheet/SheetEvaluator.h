@@ -26,6 +26,8 @@ public:
 
     Value evaluate(const std::string& name) const { return valueAt(CellRef::parse(name)); }
     Value valueAt(const CellRef& ref) const override;
+    // Only the cells the grid has, so SUM(A2:Z1048576) doesn't visit 27 million empty cells.
+    std::vector<CellRef> cellsIn(const CellRange& range) const override { return grid_.setCellsIn(range); }
 
     const DependencyGraph& getGraph() const { return graph_; }
 

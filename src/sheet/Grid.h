@@ -4,7 +4,9 @@
 #include <map>
 #include <string>
 #include <utility>
+#include <vector>
 
+#include "sheet/CellRange.h"
 #include "sheet/CellRef.h"
 
 // A sparse table of T addressed by name ("B3") or CellRef.
@@ -30,6 +32,10 @@ public:
     // One past the last row / column ever set.
     int rowCount() const { return rows_; }
     int colCount() const { return cols_; }
+
+    // The positions inside range that were set, in row-major order. Costs about as much
+    // as the cells actually set, however big the range is.
+    std::vector<CellRef> setCellsIn(const CellRange& range) const { return keysInRange(cells_, range); }
 
     // The positions that were set, as (CellRef, T) pairs in row-major order.
     typename std::map<CellRef, T>::const_iterator begin() const { return cells_.begin(); }
