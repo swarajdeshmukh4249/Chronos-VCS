@@ -33,10 +33,10 @@ file(GLOB SHEET_TESTS CONFIGURE_DEPENDS tests/sheet/*.cpp)
 add_executable(sheet_tests tests/common/TestMain.cpp ${SHEET_TESTS} ${SHEET_SOURCES})
 target_include_directories(sheet_tests PRIVATE include src tests/common)
 
-# Core layer tests.
+# Core layer tests. The core merges .csv files with the sheet layer's CellMerge, so it links those too.
 file(GLOB CORE_SOURCES CONFIGURE_DEPENDS src/core/*.cpp)
 file(GLOB CORE_TESTS CONFIGURE_DEPENDS tests/core/*.cpp)
-add_executable(core_tests tests/common/TestMain.cpp ${CORE_TESTS} ${CORE_SOURCES})
+add_executable(core_tests tests/common/TestMain.cpp ${CORE_TESTS} ${CORE_SOURCES} ${SHEET_SOURCES})
 target_include_directories(core_tests PRIVATE include src tests/common)
 
 # Plain-English layer tests.

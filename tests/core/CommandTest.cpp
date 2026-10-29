@@ -89,5 +89,27 @@ TEST(mergeCommandReportsConflictsWithExitCodeOne) {
 
     const std::string output = run(repo, {"merge", "feature"}, 1);
     CHECK(output.find("Merge stopped: 1 conflict to fix.") != std::string::npos);
+    CHECK(output.find(".csv") == std::string::npos);
     CHECK(repo.nextUndo() == "merge of branch feature");
+}
+
+// Issue #15
+TEST(mergeCommandExplainsConflictsInsideSheetCells) {
+    TempDir dir;
+    Repository repo = Repository::init(dir.path());
+    WorkingTree tree(dir.path());
+    tree.write("budget.csv", "Item,Cost\nFood,300\n");
+    repo.track("budget.csv");
+    repo.commit("first", "Swaraj");
+    repo.createBranch("feature");
+    tree.write("budget.csv", "Item,Cost\nFood,350\n");
+    repo.commit("food 350", "Swaraj");
+    repo.switchBranch("feature");
+    tree.write("budget.csv", "Item,Cost\nFood,250\n");
+    repo.commit("food 250", "Tanishka");
+    repo.switchBranch("main");
+
+    const std::string output = run(repo, {"merge", "feature"}, 1);
+    CHECK(output.find("budget.csv, B2: ") != std::string::npos);
+    CHECK(output.find("In a .csv file both values sit inside the cell") != std::string::npos);
 }
