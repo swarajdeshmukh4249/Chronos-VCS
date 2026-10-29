@@ -142,6 +142,15 @@ footer{color:var(--dim);font-size:12px;text-align:center;margin-top:40px}
 )";
 }
 
+// One marked line per line of text. A line diff's text ends with "\n", which
+// would otherwise show as an empty line.
+void writeLines(std::ostream& out, const std::string& text, const char* cls, const char* sign) {
+    std::istringstream lines(text);
+    for (std::string line; std::getline(lines, line);) {
+        out << "\n<span class=\"" << cls << "\">" << sign << escape(line) << "</span>";
+    }
+}
+
 void writeChanges(std::ostream& out, const Repository& repo, const Commit& commit) {
     std::vector<FileDiff> diffs;
     if (commit.hasParent()) {
@@ -165,12 +174,8 @@ void writeChanges(std::ostream& out, const Repository& repo, const Commit& commi
         }
         for (const Change& change : file.result.changes) {
             out << "\n<span class=\"loc\">@ " << escape(change.location) << "</span>";
-            if (!change.before.empty()) {
-                out << "\n<span class=\"minus\">- " << escape(change.before) << "</span>";
-            }
-            if (!change.after.empty()) {
-                out << "\n<span class=\"plus\">+ " << escape(change.after) << "</span>";
-            }
+            writeLines(out, change.before, "minus", "- ");
+            writeLines(out, change.after, "plus", "+ ");
         }
         out << "</div>\n";
     }

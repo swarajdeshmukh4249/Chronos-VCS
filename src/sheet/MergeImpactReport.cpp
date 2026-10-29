@@ -168,6 +168,26 @@ MergeImpactReport::MergeImpactReport(const std::string& base, const std::string&
         }
         impacts_.push_back(impact);
     }
+
+    // A paradox spreads: a total reading the cell changes too, or breaks.
+    for (CellImpact& impact : impacts_) {
+        if (!impact.semantic) {
+            continue;
+        }
+        std::vector<std::string> knockOn;
+        for (const CellRef& later : graph.affectedBy(impact.cell)) {
+            for (const CellImpact& other : impacts_) {
+                if (other.cell == later && !other.semantic) {
+                    const bool broken = other.merged.rfind("error:", 0) == 0;
+                    knockOn.push_back(later.toString() + " (now " + (broken ? "an error" : other.merged) + ")");
+                }
+            }
+        }
+        if (!knockOn.empty()) {
+            impact.explanation += " Because of it, " + joined(knockOn) + (knockOn.size() == 1 ? " changes" : " change") +
+                                  " too.";
+        }
+    }
 }
 
 std::vector<CellImpact> MergeImpactReport::semanticConflicts() const {
