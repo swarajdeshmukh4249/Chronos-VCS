@@ -20,6 +20,9 @@ struct Details {
     // The commits the request names, in the order they were named. A diff can
     // use two ("compare 2 and 5"); every other command uses the first.
     std::vector<int> commitIds;
+    // A name the request used for a branch that doesn't exist. Kept so a
+    // "did you mean...?" can offer the closest real branch.
+    std::string unknownName;
 
     // The time phrase the request used, when it had one.
     TimeWindow when;
