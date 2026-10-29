@@ -105,3 +105,14 @@ TEST(theImpactReportListsOrdinaryChangesToo) {
 TEST(aSheetWithoutFormulasHasNoImpacts) {
     CHECK(MergeImpactReport("a,1\n", "a,2\n", "b,1\n", "b,2\n").impacts().empty());
 }
+
+// The paradox in C1 also breaks the total in C3, which reads it.
+TEST(aParadoxNamesTheCellsItKnocksOn) {
+    const std::string base = "Rent,10,=B1*2\nFood,30,=B2*2\nSum,,=C1+C2\n";
+    const std::string ours = "Rent,50,=B1*2\nFood,30,=B2*2\nSum,,=C1+C2\n";
+    const std::string theirs = "Rent,10,\"=IF(B1>20,\"\"OVER BUDGET\"\",B1*2)\"\nFood,30,=B2*2\nSum,,=C1+C2\n";
+    const MergeResult result = mergeSheets(base, ours, theirs);
+    CHECK(result.conflicts.size() == 1);
+    CHECK(result.conflicts[0].location == "C1");
+    CHECK(result.conflicts[0].explanation.find("Because of it, C3 (now an error) changes too.") != std::string::npos);
+}
