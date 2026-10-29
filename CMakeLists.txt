@@ -45,12 +45,21 @@ file(GLOB NLP_TESTS CONFIGURE_DEPENDS tests/nlp/*.cpp)
 add_executable(nlp_tests tests/common/TestMain.cpp ${NLP_TESTS} ${NLP_SOURCES})
 target_include_directories(nlp_tests PRIVATE include src tests/common)
 
+# The demo script end to end (#37). It is the one test that crosses all three
+# layers at once, so it links all of them and leaves the per-layer targets
+# above independent of each other.
+file(GLOB DEMO_TESTS CONFIGURE_DEPENDS tests/demo/*.cpp)
+add_executable(demo_tests tests/common/TestMain.cpp ${DEMO_TESTS}
+    ${CORE_SOURCES} ${SHEET_SOURCES} ${NLP_SOURCES})
+target_include_directories(demo_tests PRIVATE include src tests/common tests/core)
+
 enable_testing()
 add_test(NAME sheet_tests COMMAND sheet_tests)
 add_test(NAME core_tests COMMAND core_tests)
 add_test(NAME nlp_tests COMMAND nlp_tests)
+add_test(NAME demo_tests COMMAND demo_tests)
 
-foreach(target chrono sheet_tests core_tests nlp_tests)
+foreach(target chrono sheet_tests core_tests nlp_tests demo_tests)
     if(MSVC)
         target_compile_options(${target} PRIVATE /W4)
     else()
