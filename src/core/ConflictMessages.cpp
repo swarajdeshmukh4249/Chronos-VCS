@@ -82,10 +82,16 @@ ConflictMessage ConflictMessages::explain(const std::string& path, const Conflic
     if (!conflict.base.empty()) {
         appendSide(message.details, "before", conflict.base);
     }
-    message.advice = Repository::isSheet(path)
-                         ? "Both values are in the cell now, between <<<<<<< and >>>>>>>. Replace the whole cell "
-                           "with the one you want."
-                         : "Keep the lines you want, then delete the <<<<<<<, ======= and >>>>>>> lines.";
+    // Only a conflict in one cell leaves markers in a sheet. A conflict over a whole
+    // row (deleted on one side, or added on both) has none, so there is nothing to delete.
+    if (!Repository::isSheet(path)) {
+        message.advice = "Keep the lines you want, then delete the <<<<<<<, ======= and >>>>>>> lines.";
+    } else if (looksLikeCellRef(conflict.location)) {
+        message.advice = "Both values are in the cell now, between <<<<<<< and >>>>>>>. Replace the whole cell "
+                         "with the one you want.";
+    } else {
+        message.advice = "There are no markers for this one: edit the rows to how you want them, then commit.";
+    }
     return message;
 }
 

@@ -15,9 +15,25 @@ namespace fs = std::filesystem;
 
 namespace {
 
+// True when a sheet cell still holds part of a CellMerge::conflictCell marker. A
+// cell made only of '=' (a separator row such as "=======") is ordinary content, but
+// "1100 ======= 1200", a half-removed marker, is not.
+bool cellHasConflictMarker(const std::string& line) {
+    std::istringstream cells(line);
+    for (std::string cell; std::getline(cells, cell, ',');) {
+        if (cell.find("<<<<<<<") != std::string::npos || cell.find(">>>>>>>") != std::string::npos) {
+            return true;
+        }
+        if (cell.find("=======") != std::string::npos && cell.find_first_not_of("= \"") != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // True when any part of a conflict marker is still in content. LineMerge puts its
 // three markers on lines of their own; CellMerge writes all three inside one cell
-// (see CellMerge::conflictCell), so in a sheet they count anywhere in a line.
+// (see CellMerge::conflictCell), so in a sheet they count anywhere in a cell.
 bool hasConflictMarkers(const std::string& path, const std::string& content) {
     const bool sheet = Repository::isSheet(path);
     std::istringstream lines(content);
@@ -26,8 +42,7 @@ bool hasConflictMarkers(const std::string& path, const std::string& content) {
             line.pop_back();
         }
         if (sheet) {
-            if (line.find("<<<<<<<") != std::string::npos || line.find("=======") != std::string::npos ||
-                line.find(">>>>>>>") != std::string::npos) {
+            if (cellHasConflictMarker(line)) {
                 return true;
             }
         } else if (line.rfind("<<<<<<< ", 0) == 0 || line == "=======" || line.rfind(">>>>>>> ", 0) == 0) {

@@ -661,3 +661,17 @@ TEST(sheetRowsAddedTwiceAreFlaggedButCanBeKept) {
     CHECK(repo.isMerging());
     CHECK(repo.commit("keep both trips", "Swaraj").isMerge());
 }
+
+// A cell holding only '=' is a separator, not a leftover marker, so it must not
+// keep a fixed merge from being committed.
+TEST(sheetSeparatorCellsAreNotConflictMarkers) {
+    TempDir dir;
+    Repository repo = sheetRepo(dir);
+    const std::string separator = "=======,=======\n";
+    const MergeOutcome outcome =
+        mergeEdits(repo, dir, "budget.csv", "Item,Cost,Owner\nRent,1100,Swaraj\n" + separator,
+                   "Item,Cost,Owner\nRent,1200,Swaraj\n" + separator);
+    CHECK(outcome.kind == MergeOutcome::Kind::Conflicts);
+    writeFile(dir, "budget.csv", "Item,Cost,Owner\nRent,1200,Swaraj\n" + separator);
+    CHECK(repo.commit("settle rent at 1200", "Swaraj").isMerge());
+}
