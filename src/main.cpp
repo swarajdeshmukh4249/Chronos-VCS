@@ -4,6 +4,7 @@
 #include <ctime>
 #include <exception>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <sstream>
@@ -27,6 +28,7 @@
 
 #include "common/Exceptions.h"
 #include "core/Command.h"
+#include "core/HtmlView.h"
 #include "core/Repository.h"
 #include "nlp/RequestPlanner.h"
 #include "nlp/RuleBasedParser.h"
@@ -60,6 +62,7 @@ const char* const kUsage =
     "  checkout <id>         put the files from a commit back\n"
     "  revert <id>           put a commit's files back and record it as a new commit\n"
     "  undo                  take back the last command that changed something\n"
+    "  view [--no-open]      draw the history, branches and sheets as a web page and open it\n"
     "  say <request>         do what a plain-English request asks, e.g.\n"
     "                        chrono say \"go back to how things were yesterday evening\"\n"
     "                        add -y to skip the question before anything is overwritten\n";
@@ -257,6 +260,25 @@ int run(const std::vector<std::string>& args) {
     // Commands that change the repository are Command objects, so undo can take them back.
     if (std::unique_ptr<Command> change = CommandFactory::create(args, author())) {
         return change->run(repo, std::cout);
+    }
+
+    if (command == "view" && (args.size() == 1 || (args.size() == 2 && args[1] == "--no-open"))) {
+        const fs::path page = repo.getRoot() / ".chrono" / "view.html";
+        std::ofstream(page, std::ios::binary) << HtmlView::render(repo);
+        std::cout << "Drew the repository in " << page.string() << "\n";
+        if (args.size() == 1) {
+#ifdef _WIN32
+            const std::string open = "start \"\" \"" + page.string() + "\"";
+#elif defined(__APPLE__)
+            const std::string open = "open \"" + page.string() + "\"";
+#else
+            const std::string open = "xdg-open \"" + page.string() + "\" >/dev/null 2>&1 &";
+#endif
+            if (std::system(open.c_str()) != 0) {
+                std::cout << "Open that file in a web browser to see it.\n";
+            }
+        }
+        return 0;
     }
 
     if (command == "log" && (args.size() == 1 || (args.size() == 2 && args[1] == "--all"))) {
