@@ -1,22 +1,51 @@
 #include "core/Repository.h"
 
 #include <algorithm>
+#include <cctype>
 #include <ctime>
 #include <sstream>
 
 #include "common/Exceptions.h"
 #include "core/LCSDiff.h"
 #include "core/LineMerge.h"
+#include "sheet/CellDiff.h"
+#include "sheet/CellMerge.h"
 
 namespace fs = std::filesystem;
 
 namespace {
 
-// True when any of the three lines LineMerge writes around a conflict is still in content.
-bool hasConflictMarkers(const std::string& content) {
+// True when a sheet cell still holds part of a CellMerge::conflictCell marker. A
+// cell made only of '=' (a separator row such as "=======") is ordinary content, but
+// "1100 ======= 1200", a half-removed marker, is not.
+bool cellHasConflictMarker(const std::string& line) {
+    std::istringstream cells(line);
+    for (std::string cell; std::getline(cells, cell, ',');) {
+        if (cell.find("<<<<<<<") != std::string::npos || cell.find(">>>>>>>") != std::string::npos) {
+            return true;
+        }
+        if (cell.find("=======") != std::string::npos && cell.find_first_not_of("= \"") != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// True when any part of a conflict marker is still in content. LineMerge puts its
+// three markers on lines of their own; CellMerge writes all three inside one cell
+// (see CellMerge::conflictCell), so in a sheet they count anywhere in a cell.
+bool hasConflictMarkers(const std::string& path, const std::string& content) {
+    const bool sheet = Repository::isSheet(path);
     std::istringstream lines(content);
     for (std::string line; std::getline(lines, line);) {
-        if (line.rfind("<<<<<<< ", 0) == 0 || line == "=======" || line.rfind(">>>>>>> ", 0) == 0) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        if (sheet) {
+            if (cellHasConflictMarker(line)) {
+                return true;
+            }
+        } else if (line.rfind("<<<<<<< ", 0) == 0 || line == "=======" || line.rfind(">>>>>>> ", 0) == 0) {
             return true;
         }
     }
@@ -89,9 +118,9 @@ const Commit& Repository::commit(const std::string& message, const std::string& 
     if (isMerging()) {
         for (const auto& [path, snapshot] : files) {
             const std::string& content = snapshot.getContent();
-            if (hasConflictMarkers(content)) {
-                throw MergeConflictException(path + " still has conflict markers. Edit it to keep the lines you "
-                                                    "want, then commit again.");
+            if (hasConflictMarkers(path, content)) {
+                throw MergeConflictException(path + " still has conflict markers. Edit it to keep the " +
+                                             (isSheet(path) ? "values" : "lines") + " you want, then commit again.");
             }
         }
     } else if (!differsFromHead(files)) {
@@ -343,11 +372,24 @@ std::vector<FileDiff> Repository::compare(const Commit::Files& before, const Com
     return diffs;
 }
 
-std::unique_ptr<MergeStrategy> Repository::mergeStrategyFor(const std::string&) {
+bool Repository::isSheet(const std::string& path) {
+    std::string extension = fs::path(path).extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return extension == ".csv";
+}
+
+std::unique_ptr<MergeStrategy> Repository::mergeStrategyFor(const std::string& path) {
+    if (isSheet(path)) {
+        return std::make_unique<CellMerge>();
+    }
     return std::make_unique<LineMerge>();
 }
 
-std::unique_ptr<DiffAlgorithm> Repository::diffAlgorithmFor(const std::string&) {
+std::unique_ptr<DiffAlgorithm> Repository::diffAlgorithmFor(const std::string& path) {
+    if (isSheet(path)) {
+        return std::make_unique<CellDiff>();
+    }
     return std::make_unique<LCSDiff>();
 }
 

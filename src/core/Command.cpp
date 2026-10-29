@@ -1,7 +1,10 @@
 #include "core/Command.h"
 
+#include <algorithm>
 #include <exception>
 #include <filesystem>
+
+#include "core/ConflictMessages.h"
 
 #include "common/Exceptions.h"
 
@@ -104,14 +107,10 @@ int MergeCommand::execute(Repository& repo, std::ostream& out) {
     case MergeOutcome::Kind::Conflicts:
         break;
     }
-    out << "Merge stopped: " << outcome.conflicts.size()
-        << (outcome.conflicts.size() == 1 ? " conflict" : " conflicts") << " to fix.\n";
-    for (const MergeOutcome::FileConflict& file : outcome.conflicts) {
-        out << "  " << file.path << ", " << file.conflict.location << ": " << file.conflict.explanation << "\n";
+    // The branch names only exist here, so the wording is left to ConflictMessages.
+    for (const std::string& line : ConflictMessages::report(outcome, repo.getCurrentBranch(), branch_)) {
+        out << line << "\n";
     }
-    out << "\nIn each file, between <<<<<<< and >>>>>>>, \"ours\" is this branch and \"theirs\" is " << branch_
-        << ".\nKeep the lines you want, delete the markers, then run chrono commit -m \"<message>\".\n"
-        << "To cancel instead, run chrono merge --abort (or chrono undo).\n";
     return 1;
 }
 

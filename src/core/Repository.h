@@ -51,6 +51,9 @@ public:
     // Opens the repository that contains start. Throws RepositoryNotFoundException.
     static Repository open(const std::filesystem::path& start);
 
+    // True for spreadsheet files (.csv, any case), which are compared and merged cell by cell.
+    static bool isSheet(const std::string& path);
+
     const std::filesystem::path& getRoot() const { return tree_.getRoot(); }
 
     // Includes the file in every later commit and returns its path relative to
@@ -167,9 +170,9 @@ private:
                                 std::vector<MergeOutcome::FileConflict>& conflicts) const;
 
     static std::vector<FileDiff> compare(const Commit::Files& before, const Commit::Files& after);
-    // Strategy pattern: how to compare one file. Phase 3 adds a cell-by-cell diff for .csv files.
+    // Strategy pattern: how to compare one file. Sheets get CellDiff, everything else LCSDiff.
     static std::unique_ptr<DiffAlgorithm> diffAlgorithmFor(const std::string& path);
-    // Strategy pattern: how to merge one file. #15 sends .csv files to a cell-by-cell merge.
+    // Strategy pattern: how to merge one file. Sheets get CellMerge, everything else LineMerge.
     static std::unique_ptr<MergeStrategy> mergeStrategyFor(const std::string& path);
 
     WorkingTree tree_;

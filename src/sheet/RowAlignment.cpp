@@ -25,12 +25,25 @@ const std::uint64_t kSameKey = std::uint64_t{1} << 32;
 
 // How alike an old and a new row are, for deciding whether the new row is an edit of
 // the old one. The first field is usually the row's name ("Rent"), so a matching
-// non-empty first field counts most; otherwise at least half the fields must match.
-// 0 means "not the same row".
+// non-empty first field counts most; otherwise at least half the fields that could
+// match must match. 0 means "not the same row".
+//
+// Only columns holding something on one side or the other are counted, because a
+// column empty in both can never add to same and would otherwise make a row look
+// less like itself than it is. A sheet such as "10,,=A1*2", whose middle column is
+// spare, used to fail on that empty column alone: one of its two real columns
+// matching is half, but one of three was not. A row both branches had edited was
+// then read as deleted on one side and added on the other, and ended up in the
+// file twice.
 std::uint64_t likeness(const CSVHandler::Row& a, const CSVHandler::Row& b) {
     const std::size_t width = std::max(a.size(), b.size());
     std::uint64_t same = 0;
+    std::size_t comparable = 0;
     for (std::size_t col = 0; col < width; ++col) {
+        if (fieldAt(a, col).empty() && fieldAt(b, col).empty()) {
+            continue;
+        }
+        ++comparable;
         if (!fieldAt(a, col).empty() && fieldAt(a, col) == fieldAt(b, col)) {
             ++same;
         }
@@ -38,7 +51,7 @@ std::uint64_t likeness(const CSVHandler::Row& a, const CSVHandler::Row& b) {
     if (!fieldAt(a, 0).empty() && fieldAt(a, 0) == fieldAt(b, 0)) {
         return kSameKey + same;
     }
-    return same > 0 && 2 * same >= width ? same : 0;
+    return same > 0 && 2 * same >= comparable ? same : 0;
 }
 
 // Ends a run of changed rows. Each removed row is paired with the added row most like

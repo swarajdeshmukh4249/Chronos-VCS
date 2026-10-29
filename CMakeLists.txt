@@ -33,17 +33,33 @@ file(GLOB SHEET_TESTS CONFIGURE_DEPENDS tests/sheet/*.cpp)
 add_executable(sheet_tests tests/common/TestMain.cpp ${SHEET_TESTS} ${SHEET_SOURCES})
 target_include_directories(sheet_tests PRIVATE include src tests/common)
 
-# Core layer tests.
+# Core layer tests. The core merges .csv files with the sheet layer's CellMerge, so it links those too.
 file(GLOB CORE_SOURCES CONFIGURE_DEPENDS src/core/*.cpp)
 file(GLOB CORE_TESTS CONFIGURE_DEPENDS tests/core/*.cpp)
-add_executable(core_tests tests/common/TestMain.cpp ${CORE_TESTS} ${CORE_SOURCES})
+add_executable(core_tests tests/common/TestMain.cpp ${CORE_TESTS} ${CORE_SOURCES} ${SHEET_SOURCES})
 target_include_directories(core_tests PRIVATE include src tests/common)
+
+# Plain-English layer tests.
+file(GLOB NLP_SOURCES CONFIGURE_DEPENDS src/nlp/*.cpp)
+file(GLOB NLP_TESTS CONFIGURE_DEPENDS tests/nlp/*.cpp)
+add_executable(nlp_tests tests/common/TestMain.cpp ${NLP_TESTS} ${NLP_SOURCES})
+target_include_directories(nlp_tests PRIVATE include src tests/common)
+
+# The demo script end to end (#37). It is the one test that crosses all three
+# layers at once, so it links all of them and leaves the per-layer targets
+# above independent of each other.
+file(GLOB DEMO_TESTS CONFIGURE_DEPENDS tests/demo/*.cpp)
+add_executable(demo_tests tests/common/TestMain.cpp ${DEMO_TESTS}
+    ${CORE_SOURCES} ${SHEET_SOURCES} ${NLP_SOURCES})
+target_include_directories(demo_tests PRIVATE include src tests/common tests/core)
 
 enable_testing()
 add_test(NAME sheet_tests COMMAND sheet_tests)
 add_test(NAME core_tests COMMAND core_tests)
+add_test(NAME nlp_tests COMMAND nlp_tests)
+add_test(NAME demo_tests COMMAND demo_tests)
 
-foreach(target chrono sheet_tests core_tests)
+foreach(target chrono sheet_tests core_tests nlp_tests demo_tests)
     if(MSVC)
         target_compile_options(${target} PRIVATE /W4)
     else()
