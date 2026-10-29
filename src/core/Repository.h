@@ -77,6 +77,8 @@ public:
     const History<Commit>& log() const { return commits_; }
     // Ids of the commits that led to HEAD, through both parents of merges, newest first.
     std::vector<int> historyOfHead() const;
+    // The newest commit in historyOfHead() saved before when, or 0 if there is none.
+    int latestCommitBefore(std::time_t when) const;
     // Every commit reachable from id through either parent, including id itself.
     // Throws CommitNotFoundException.
     std::set<int> ancestorsOf(int id) const;
