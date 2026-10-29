@@ -1,7 +1,6 @@
 #pragma once
 
-#include <map>
-#include <set>
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -41,14 +40,19 @@ const CellRef& keyOf(const std::pair<const CellRef, T>& entry) {
 }  // namespace detail
 
 // The keys of a CellRef-ordered std::map or std::set that fall inside range, in row
-// order. Sheets are sparse, so this looks up each row of the range when it has fewer
-// rows than there are keys, and otherwise checks every key: either way a whole-column
-// range like A2:Z1048576 costs about as much as the cells actually set.
+// order. Sheets are sparse, so this takes whichever route is cheaper: looking up each
+// row of the range costs one tree descent per row, about rows * log2(keys) steps, while
+// checking every key costs one step each. Either way a whole-column range like
+// A2:Z1048576 costs about as much as the cells actually set.
 template <typename Container>
 std::vector<CellRef> keysInRange(const Container& keys, const CellRange& range) {
     std::vector<CellRef> found;
     const auto rows = static_cast<std::size_t>(range.bottomRight.row - range.topLeft.row + 1);
-    if (rows <= keys.size()) {
+    std::size_t stepsPerRow = 1;
+    while ((std::size_t{1} << stepsPerRow) < keys.size()) {
+        ++stepsPerRow;
+    }
+    if (rows * stepsPerRow <= keys.size()) {
         for (int row = range.topLeft.row; row <= range.bottomRight.row; ++row) {
             for (auto it = keys.lower_bound(CellRef{row, range.topLeft.col});
                  it != keys.end() && detail::keyOf(*it).row == row && detail::keyOf(*it).col <= range.bottomRight.col;
