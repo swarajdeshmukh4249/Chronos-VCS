@@ -135,3 +135,20 @@ TEST(cellMergeShowsEmptyValuesInConflictCells) {
     CHECK(result.conflicts.size() == 1);
     CHECK(result.mergedContent == "a,<<<<<<< ours: (empty) ======= theirs: c >>>>>>>\n");
 }
+
+// The example the whole project is pitched on, from PROJECT_CONTEXT section 1:
+// A1 = 10 and C1 = =A1*2, one branch changing A1 and the other C1. The middle
+// column is spare, and counting it used to stop the two sides' rows being
+// paired at all, so this merged into two rows instead of one.
+TEST(cellMergeHandlesTheSheetFromTheDemoWithASpareColumn) {
+    // The formula holds commas, so in the file it is a quoted field.
+    const std::string theirs = "10,,\"=IF(A1>20,\"\"OVER BUDGET\"\",A1*2)\"\n";
+    const MergeResult result = mergeSheets("10,,=A1*2\n", "50,,=A1*2\n", theirs);
+    CHECK(result.conflicts.empty());
+
+    const CSVHandler::Rows rows = CSVHandler::parseRows(result.mergedContent);
+    CHECK(rows.size() == 1);
+    CHECK(rows[0].size() == 3);
+    CHECK(rows[0][0] == "50");                               // A1 from ours
+    CHECK(rows[0][2] == "=IF(A1>20,\"OVER BUDGET\",A1*2)");  // C1 from theirs
+}
