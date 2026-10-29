@@ -5,6 +5,7 @@
 #include "TempDir.h"
 #include "common/Exceptions.h"
 #include "core/Repository.h"
+#include "sheet/CellMerge.h"
 
 namespace {
 
@@ -552,4 +553,111 @@ TEST(mergeRules) {
     CHECK(repo.merge("feature", "Swaraj").kind == MergeOutcome::Kind::AlreadyUpToDate);
     writeFile(dir, "budget.txt", "unsaved\n");
     CHECK_THROWS(repo.merge("feature", "Swaraj"), UncommittedChangesException);
+}
+
+namespace {
+
+const char* const kSheet = "Item,Cost,Owner\nRent,1000,Swaraj\nFood,300,Tanishka\n";
+
+// main: #1 with path holding kSheet; feature branches off #1.
+Repository sheetRepo(const TempDir& dir, const std::string& path = "budget.csv") {
+    Repository repo = Repository::init(dir.path());
+    writeFile(dir, path, kSheet);
+    repo.track(path);
+    repo.commit("first budget", "Swaraj");
+    repo.createBranch("feature");
+    return repo;
+}
+
+// Commits ours on main and theirs on feature, then merges feature into main.
+MergeOutcome mergeEdits(Repository& repo, const TempDir& dir, const std::string& path, const std::string& ours,
+                        const std::string& theirs) {
+    writeFile(dir, path, ours);
+    repo.commit("ours", "Swaraj");
+    repo.switchBranch("feature");
+    writeFile(dir, path, theirs);
+    repo.commit("theirs", "Tanishka");
+    repo.switchBranch("main");
+    return repo.merge("feature", "Swaraj");
+}
+
+}  // namespace
+
+// Issue #15
+TEST(onlyCsvFilesAreSheets) {
+    CHECK(Repository::isSheet("budget.csv"));
+    CHECK(Repository::isSheet("data/Budget.CSV"));
+    CHECK(!Repository::isSheet("budget.txt"));
+    CHECK(!Repository::isSheet("csv"));
+    CHECK(!Repository::isSheet("budget.csv.bak"));
+}
+
+TEST(sheetDiffsNameTheChangedCell) {
+    TempDir dir;
+    Repository repo = sheetRepo(dir);
+    writeFile(dir, "budget.csv", "Item,Cost,Owner\nRent,1100,Swaraj\nFood,300,Tanishka\n");
+    const std::vector<FileDiff> diffs = repo.diffUncommitted();
+    CHECK(diffs.size() == 1);
+    CHECK(diffs[0].result.changes.size() == 1);
+    CHECK(diffs[0].result.changes[0].location == "B2");
+    CHECK(diffs[0].result.changes[0].before == "1000");
+    CHECK(diffs[0].result.changes[0].after == "1100");
+}
+
+// The integration checkpoint: one row edited in different cells on each branch. A
+// line merge sees one line changed twice; the cell merge keeps both edits.
+TEST(sheetMergeKeepsEditsToDifferentCellsOfOneRow) {
+    const std::string ours = "Item,Cost,Owner\nRent,1100,Swaraj\nFood,300,Tanishka\n";
+    const std::string theirs = "Item,Cost,Owner\nRent,1000,Both\nFood,300,Tanishka\n";
+    {
+        TempDir dir;
+        Repository repo = sheetRepo(dir);
+        const MergeOutcome outcome = mergeEdits(repo, dir, "budget.csv", ours, theirs);
+        CHECK(outcome.kind == MergeOutcome::Kind::Merged);
+        CHECK(readFile(dir, "budget.csv") == "Item,Cost,Owner\nRent,1100,Both\nFood,300,Tanishka\n");
+    }
+    {
+        TempDir dir;
+        Repository repo = sheetRepo(dir, "budget.txt");
+        CHECK(mergeEdits(repo, dir, "budget.txt", ours, theirs).kind == MergeOutcome::Kind::Conflicts);
+    }
+}
+
+TEST(sheetConflictsStayInTheCellUntilFixed) {
+    TempDir dir;
+    Repository repo = sheetRepo(dir);
+    const MergeOutcome outcome =
+        mergeEdits(repo, dir, "budget.csv", "Item,Cost,Owner\nRent,1100,Swaraj\nFood,300,Tanishka\n",
+                   "Item,Cost,Owner\nRent,1200,Swaraj\nFood,300,Tanishka\n");
+    CHECK(outcome.kind == MergeOutcome::Kind::Conflicts);
+    CHECK(outcome.conflicts.size() == 1);
+    CHECK(outcome.conflicts[0].path == "budget.csv");
+    CHECK(outcome.conflicts[0].conflict.location == "B2");
+    CHECK(readFile(dir, "budget.csv") ==
+          "Item,Cost,Owner\nRent," + CellMerge::conflictCell("1100", "1200") + ",Swaraj\nFood,300,Tanishka\n");
+
+    // The markers sit mid-line, and any part of them left behind still counts.
+    CHECK_THROWS(repo.commit("too early", "Swaraj"), MergeConflictException);
+    writeFile(dir, "budget.csv", "Item,Cost,Owner\nRent,theirs: 1200 >>>>>>>,Swaraj\nFood,300,Tanishka\n");
+    CHECK_THROWS(repo.commit("half fixed", "Swaraj"), MergeConflictException);
+    writeFile(dir, "budget.csv", "Item,Cost,Owner\r\nRent,1100 ======= 1200,Swaraj\r\nFood,300,Tanishka\r\n");
+    CHECK_THROWS(repo.commit("half fixed", "Swaraj"), MergeConflictException);
+
+    writeFile(dir, "budget.csv", "Item,Cost,Owner\nRent,1200,Swaraj\nFood,300,Tanishka\n");
+    CHECK(repo.commit("settle rent at 1200", "Swaraj").isMerge());
+}
+
+// CellMerge flags the same item added on both sides but writes no markers, since
+// keeping both rows can be the right answer; the merge still waits for a commit.
+TEST(sheetRowsAddedTwiceAreFlaggedButCanBeKept) {
+    TempDir dir;
+    Repository repo = sheetRepo(dir);
+    const MergeOutcome outcome = mergeEdits(repo, dir, "budget.csv", std::string(kSheet) + "Travel,150,Swaraj\n",
+                                            std::string(kSheet) + "Travel,200,Tanishka\n");
+    CHECK(outcome.kind == MergeOutcome::Kind::Conflicts);
+    CHECK(outcome.conflicts.size() == 1);
+    CHECK(outcome.conflicts[0].conflict.explanation.find("\"Travel\"") != std::string::npos);
+    CHECK(readFile(dir, "budget.csv") == std::string(kSheet) + "Travel,150,Swaraj\nTravel,200,Tanishka\n");
+    CHECK(repo.isMerging());
+    CHECK(repo.commit("keep both trips", "Swaraj").isMerge());
 }

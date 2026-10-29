@@ -1,5 +1,6 @@
 #include "core/Command.h"
 
+#include <algorithm>
 #include <exception>
 #include <filesystem>
 
@@ -109,8 +110,13 @@ int MergeCommand::execute(Repository& repo, std::ostream& out) {
     for (const MergeOutcome::FileConflict& file : outcome.conflicts) {
         out << "  " << file.path << ", " << file.conflict.location << ": " << file.conflict.explanation << "\n";
     }
+    const bool sheet = std::any_of(outcome.conflicts.begin(), outcome.conflicts.end(),
+                                   [](const MergeOutcome::FileConflict& file) { return Repository::isSheet(file.path); });
     out << "\nIn each file, between <<<<<<< and >>>>>>>, \"ours\" is this branch and \"theirs\" is " << branch_
-        << ".\nKeep the lines you want, delete the markers, then run chrono commit -m \"<message>\".\n"
+        << ".\n"
+        << (sheet ? "In a .csv file both values sit inside the cell: replace the whole cell with the one you want.\n"
+                  : "")
+        << "Keep the lines you want, delete the markers, then run chrono commit -m \"<message>\".\n"
         << "To cancel instead, run chrono merge --abort (or chrono undo).\n";
     return 1;
 }
