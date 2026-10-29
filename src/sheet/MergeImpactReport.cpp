@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <exception>
+#include <iterator>
 #include <map>
 #include <set>
 
