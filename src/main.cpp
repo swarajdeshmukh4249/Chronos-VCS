@@ -1,5 +1,7 @@
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <exception>
 #include <filesystem>
 #include <iostream>
@@ -26,10 +28,17 @@
 #include "common/Exceptions.h"
 #include "core/Command.h"
 #include "core/Repository.h"
+#include "nlp/RequestPlanner.h"
+#include "nlp/RuleBasedParser.h"
 
 namespace fs = std::filesystem;
 
 namespace {
+
+// Plain-English requests come back out as ordinary command-line words and run
+// through the same dispatch as anything typed. Declared here because `say` is
+// handled inside run() itself.
+int run(const std::vector<std::string>& args);
 
 // Commands that change the repository come from CommandFactory; read-only ones
 // (log, show, diff, status, verify, listing branches) are handled here.
@@ -50,7 +59,10 @@ const char* const kUsage =
     "  verify                check that no saved history was changed or lost\n"
     "  checkout <id>         put the files from a commit back\n"
     "  revert <id>           put a commit's files back and record it as a new commit\n"
-    "  undo                  take back the last command that changed something\n";
+    "  undo                  take back the last command that changed something\n"
+    "  say <request>         do what a plain-English request asks, e.g.\n"
+    "                        chrono say \"go back to how things were yesterday evening\"\n"
+    "                        add -y to skip the question before anything is overwritten\n";
 
 std::string author() {
     for (const char* name : {"CHRONO_AUTHOR", "USER", "USERNAME"}) {
@@ -106,6 +118,92 @@ void printDiffs(const std::vector<FileDiff>& diffs) {
     }
 }
 
+// The picture of the repository that the plain-English layer reads. It takes
+// this rather than the Repository itself, so src/nlp doesn't depend on src/core.
+RequestContext contextFor(const Repository& repo) {
+    RequestContext context;
+    for (const Branch& branch : repo.getBranches()) {
+        context.branches.push_back(branch.getName());
+    }
+    context.currentBranch = repo.getCurrentBranch();
+    context.trackedFiles.assign(repo.getTracked().begin(), repo.getTracked().end());
+    for (const Commit& commit : repo.log()) {
+        context.commits.push_back({commit.getId(), commit.getTimestamp(), commit.getMessage()});
+    }
+    context.now = std::time(nullptr);
+    context.hasUncommittedChanges = repo.hasUncommittedChanges();
+    context.isMerging = repo.isMerging();
+    context.undoable = repo.nextUndo();
+    return context;
+}
+
+// Puts a word back in quotes if it needs them, so the line printed as "this
+// runs" can be copied and pasted.
+std::string shellWord(const std::string& word) {
+    return word.find(' ') == std::string::npos ? word : "\"" + word + "\"";
+}
+
+// Anything but a clear yes counts as no, so a stray keypress, or input that
+// isn't a terminal at all, never starts a command that overwrites files.
+bool confirmed(const std::string& question) {
+    std::cout << question << " [y/N] " << std::flush;
+    std::string answer;
+    if (!std::getline(std::cin, answer)) {
+        std::cout << "\n";
+        return false;
+    }
+    std::string trimmed;
+    for (char c : answer) {
+        if (!std::isspace(static_cast<unsigned char>(c))) {
+            trimmed += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+    }
+    return trimmed == "y" || trimmed == "yes";
+}
+
+int say(const Repository& repo, const std::vector<std::string>& words, bool assumeYes) {
+    std::string request;
+    for (const std::string& word : words) {
+        request += (request.empty() ? "" : " ") + word;
+    }
+
+    const RuleBasedParser parser;
+    const RequestPlanner planner(parser);
+    const RequestPlan plan = planner.plan(request, contextFor(repo));
+
+    if (plan.outcome == RequestPlan::Outcome::Unclear) {
+        for (const std::string& problem : plan.problems) {
+            std::cout << problem << "\n";
+        }
+        return 1;
+    }
+    if (plan.outcome == RequestPlan::Outcome::DidYouMean) {
+        std::cout << (plan.options.size() == 1 ? "Did you mean this?\n" : "That could mean more than one thing:\n");
+        for (const std::string& option : plan.options) {
+            std::cout << "  - " << option << "\n";
+        }
+        std::cout << "Say which one you want, or type the command itself.\n";
+        return 1;
+    }
+
+    std::cout << "Understood: " << plan.action << "\n";
+    for (const std::string& note : plan.notes) {
+        std::cout << note << "\n";
+    }
+    std::string line = "chrono";
+    for (const std::string& word : plan.args) {
+        line += " " + shellWord(word);
+    }
+    std::cout << "Running: " << line << "\n";
+
+    if (plan.outcome == RequestPlan::Outcome::Confirm && !assumeYes && !confirmed(plan.question)) {
+        std::cout << "Nothing was changed.\n";
+        return 1;
+    }
+    std::cout << "\n";
+    return run(plan.args);
+}
+
 int run(const std::vector<std::string>& args) {
     if (args.empty()) {
         std::cout << kUsage;
@@ -135,6 +233,26 @@ int run(const std::vector<std::string>& args) {
     }
 
     Repository repo = Repository::open(fs::current_path());
+
+    // Plain English: work out which command is meant, ask first if it could
+    // overwrite anything, then run it like any other command.
+    if (command == "say" || command == "ask") {
+        bool assumeYes = false;
+        std::vector<std::string> words;
+        for (std::size_t i = 1; i < args.size(); ++i) {
+            if (args[i] == "-y" || args[i] == "--yes") {
+                assumeYes = true;
+            } else {
+                words.push_back(args[i]);
+            }
+        }
+        if (words.empty()) {
+            std::cout << "usage: chrono say \"<what you want, in plain English>\"\n"
+                      << "  e.g. chrono say \"go back to how things were yesterday evening\"\n";
+            return 1;
+        }
+        return say(repo, words, assumeYes);
+    }
 
     // Commands that change the repository are Command objects, so undo can take them back.
     if (std::unique_ptr<Command> change = CommandFactory::create(args, author())) {

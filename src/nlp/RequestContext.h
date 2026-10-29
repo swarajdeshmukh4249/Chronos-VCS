@@ -27,4 +27,14 @@ struct RequestContext {
     std::vector<CommitFact> commits;
     // What "yesterday" and "2 hours ago" are counted back from.
     std::time_t now = 0;
+
+    // Whether there is work in the folder that no commit holds yet, so a
+    // request that overwrites files knows to warn before it does.
+    bool hasUncommittedChanges = false;
+    // A merge is waiting on conflicts, so cancelling it would throw away
+    // whatever has been fixed by hand so far.
+    bool isMerging = false;
+    // What `undo` would take back, in the words Repository::nextUndo uses, or
+    // empty when there is nothing to undo.
+    std::string undoable;
 };

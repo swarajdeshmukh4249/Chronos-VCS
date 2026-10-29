@@ -245,6 +245,7 @@ Details DetailExtractor::extract(const Intent& intent, const RequestContext& con
                     guess = words[i - 1];
                 }
             }
+            details.unknownName = guess;
             details.problems.push_back(
                 (guess.empty() ? "I couldn't tell which branch you meant."
                                : "There is no branch called \"" + guess + "\".") +
