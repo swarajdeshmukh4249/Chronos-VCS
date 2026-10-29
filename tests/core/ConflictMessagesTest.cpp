@@ -172,3 +172,17 @@ TEST(aConflictWithNoExplanationStillReads) {
     CHECK(!message.details.empty());
     CHECK(message.details.front() == "on main: 1300");
 }
+
+// A row deleted on one side and edited on the other leaves no markers in the
+// sheet, so the advice must not tell the user to look for them.
+TEST(aRowConflictInASheetDoesNotMentionMarkers) {
+    Conflict row;
+    row.location = "row 2";
+    row.base = "Rent,1000";
+    row.theirs = "Rent,1200";
+    const ConflictMessage message = ConflictMessages::explain("budget.csv", row, "main", "experiment");
+    CHECK(message.advice.find("<<<<<<<") == std::string::npos);
+    CHECK(message.advice.find("no markers") != std::string::npos);
+    CHECK(ConflictMessages::explain("budget.csv", cellClash(), "main", "experiment").advice.find("<<<<<<<") !=
+          std::string::npos);
+}
