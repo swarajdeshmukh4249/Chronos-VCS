@@ -125,3 +125,5 @@ tests/            test suites for each layer, sharing tests/common/
 |---|---|
 | Swaraj ([swarajdeshmukh4249](https://github.com/swarajdeshmukh4249)) | Version control core and plain-English commands |
 | Tanishka ([tanishkatanawade](https://github.com/tanishkatanawade)) | Spreadsheet engine and semantic merge |
+| Tanmay ([tanmaytamkhane](https://github.com/tanmaytamkhane)) | engine and semantic merge |
+| Tanishq([Lord-TQ](https://github.com/Lord-TQ)) | engine and semantic merge |
